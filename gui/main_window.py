@@ -15,7 +15,6 @@ from core.service_controller import ServiceController
 from gui.log_widget import LogWidget
 from gui.tray_manager import TrayManager
 from gui.strategy_widget import StrategyWidget
-from gui.service_widget import ServiceWidget
 from gui.update_widget import UpdateWidget
 from gui.tools_widget import ToolsWidget
 
@@ -191,7 +190,6 @@ class MainWindow(QMainWindow):
         self.nav_buttons = {}
         sections = [
             ("strategy", "Strategies"),
-            ("service", "Service"),
             ("updates", "Updates"),
             ("tools", "Tools"),
         ]
@@ -217,13 +215,11 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
 
         self.log_widget = LogWidget()
-        self.strategy_widget = StrategyWidget(self.zm, self.log_widget)
-        self.service_widget = ServiceWidget(self.sc, self.zm, self.zapret_path, self.log_widget)
+        self.strategy_widget = StrategyWidget(self.zm, self.sc, self.log_widget)
         self.update_widget = UpdateWidget(self.zm, self.log_widget)
         self.tools_widget = ToolsWidget(self.sc, self.zm, self.log_widget)
 
         self.stack.addWidget(self.strategy_widget)
-        self.stack.addWidget(self.service_widget)
         self.stack.addWidget(self.update_widget)
         self.stack.addWidget(self.tools_widget)
 
@@ -243,7 +239,7 @@ class MainWindow(QMainWindow):
     def _switch_section(self, key: str):
         for k, btn in self.nav_buttons.items():
             btn.setChecked(k == key)
-        mapping = {"strategy": 0, "service": 1, "updates": 2, "tools": 3}
+        mapping = {"strategy": 0, "updates": 1, "tools": 2}
         if key in mapping:
             self.stack.setCurrentIndex(mapping[key])
 

@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (
     QLabel, QTextEdit, QSplitter, QComboBox, QGroupBox, QCheckBox
 )
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor
 from core.strategy_parser import find_strategies, parse_strategy
 
 POLL_INTERVAL_MS = 1500
@@ -19,6 +20,9 @@ class StrategyWidget(QWidget):
         self._poll_timer.timeout.connect(self._on_poll_tick)
         self._poll_attempts = 0
         self._poll_target = None  # "start" or "stop"
+        self._state = "idle"  # idle | starting | stopping | error
+        self._pending_strategy_name = None
+        self._last_error = None
         self._build_ui()
         self.refresh()
         self._auto_set_mode()
@@ -109,6 +113,9 @@ class StrategyWidget(QWidget):
         self.zm.is_service_mode = (idx == 1)
 
     def refresh(self):
+        self._state = "idle"
+        self._last_error = None
+        self._pending_strategy_name = None
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
         self.strategies = find_strategies(self.zm.zapret_path)
@@ -138,23 +145,52 @@ class StrategyWidget(QWidget):
         self.chk_autoupdate.blockSignals(False)
 
     def _on_select(self, idx: int):
+        if self._state == "error":
+            self._state = "idle"
+            self._last_error = None
         if 0 <= idx < len(self.strategies):
             info = parse_strategy(self.strategies[idx])
             args_text = "\n".join(info["args"]) if info["args"] else "No arguments found"
             self.details.setPlainText(args_text)
+        self._update_status()
 
     def _start(self):
         idx = self.list_widget.currentRow()
         if 0 <= idx < len(self.strategies):
             bat = self.strategies[idx]
-            self.zm.start_strategy(bat)
+            self._state = "starting"
+            self._pending_strategy_name = bat.stem
+            self._last_error = None
+            self._update_status()
             mode = "service" if self.zm.is_service_mode else "process"
-            self.log.log(f"Started strategy: {bat.stem} ({mode})", "system")
+            self.log.log(f"Starting strategy: {bat.stem} ({mode})", "system")
+            try:
+                self.zm.start_strategy(bat)
+            except Exception as e:
+                self._state = "error"
+                self._last_error = str(e) or "Start failed"
+                self._poll_timer.stop()
+                self._poll_target = None
+                self.log.log(f"Start failed: {self._last_error}", "error")
+                self._update_status()
+                return
             self._start_poll("start")
 
     def _stop(self):
-        self.zm.stop()
+        self._state = "stopping"
+        self._last_error = None
+        self._pending_strategy_name = self.zm.current_strategy
         self.log.log("Stopping winws.exe...", "system")
+        try:
+            self.zm.stop()
+        except Exception as e:
+            self._state = "error"
+            self._last_error = str(e) or "Stop failed"
+            self._poll_timer.stop()
+            self._poll_target = None
+            self.log.log(f"Stop failed: {self._last_error}", "error")
+            self._update_status()
+            return
         self._start_poll("stop")
 
     def _start_poll(self, target: str):
@@ -171,28 +207,53 @@ class StrategyWidget(QWidget):
         if target == "start" and running:
             self._poll_timer.stop()
             self._poll_target = None
+            self._state = "idle"
+            self._pending_strategy_name = None
             self.log.log("Strategy started successfully", "ok")
+            self._update_status()
         elif target == "stop" and not running:
             self._poll_timer.stop()
             self._poll_target = None
+            self._state = "idle"
+            self._pending_strategy_name = None
             self.log.log("Stopped successfully", "ok")
+            self._update_status()
         elif self._poll_attempts >= POLL_MAX_ATTEMPTS:
             self._poll_timer.stop()
             self._poll_target = None
             if target == "start":
                 self.log.log("Start timeout — check if winws.exe started", "error")
+                self._last_error = "Start timeout"
             else:
                 self.log.log("Stop timeout — process may still be running", "error")
+                self._last_error = "Stop timeout"
+            self._state = "error"
+            self._update_status()
 
     def _update_status(self, auto_detect=False):
         running = self.zm.is_running()
         if auto_detect and running and not self.zm.current_strategy:
             self.zm.detect_strategy()
 
-        self.btn_start.setEnabled(not running)
-        self.btn_stop.setEnabled(running)
+        if self._state in ("starting", "stopping"):
+            self.btn_start.setEnabled(False)
+            self.btn_stop.setEnabled(False)
+        else:
+            self.btn_start.setEnabled(not running)
+            self.btn_stop.setEnabled(running)
 
-        if running:
+        if self._state == "starting":
+            name = self._pending_strategy_name or self.zm.current_strategy or "selected strategy"
+            self.lbl_running.setText(f"Starting: {name}")
+            self.lbl_running.setStyleSheet("font-weight: bold; color: #2196F3; padding: 4px;")
+        elif self._state == "stopping":
+            self.lbl_running.setText("Stopping...")
+            self.lbl_running.setStyleSheet("font-weight: bold; color: #2196F3; padding: 4px;")
+        elif self._state == "error":
+            msg = self._last_error or "Operation failed"
+            self.lbl_running.setText(f"Error: {msg}")
+            self.lbl_running.setStyleSheet("font-weight: bold; color: #f44336; padding: 4px;")
+        elif running:
             cs = self.zm.current_strategy
             if cs == "__service__":
                 self.lbl_running.setText("Running as Windows service")
@@ -215,10 +276,21 @@ class StrategyWidget(QWidget):
 
     def _highlight_current(self):
         current = self.zm.current_strategy
+        if self._state in ("starting", "stopping", "error"):
+            current = self._pending_strategy_name or current
+
+        color = None
+        if self._state in ("starting", "stopping"):
+            color = QColor("#2196F3")
+        elif self._state == "error":
+            color = QColor("#f44336")
+        elif current and current != "__service__" and self.zm.is_running():
+            color = QColor("#4caf50")
+
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
-            if current and current != "__service__" and item.text() == current:
-                item.setBackground(Qt.GlobalColor.green)
+            if current and current != "__service__" and item.text() == current and color is not None:
+                item.setBackground(color)
             else:
                 item.setBackground(Qt.GlobalColor.transparent)
 

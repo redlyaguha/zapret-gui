@@ -51,6 +51,9 @@ class ZapretManager:
         return "0.0.0"
 
     def start_strategy(self, bat_path: Path):
+        if not bat_path.exists():
+            raise FileNotFoundError(f"Strategy file not found: {bat_path}")
+
         self.stop()
         if self._is_service_mode:
             info = parse_strategy(bat_path)
@@ -59,23 +62,34 @@ class ZapretManager:
             svc_script = f'sc stop zapret >nul 2>&1 & sc delete zapret >nul 2>&1 & sc create zapret binPath= "\"{winws}\" {args_str}" DisplayName= "zapret" start= auto >nul & sc start zapret >nul'
             self._run_elevated(svc_script)
         else:
-            self._process = subprocess.Popen(
-                [str(bat_path)],
-                cwd=self.zapret_path,
-                shell=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+            try:
+                self._process = subprocess.Popen(
+                    [str(bat_path)],
+                    cwd=self.zapret_path,
+                    shell=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except OSError as e:
+                raise RuntimeError(f"Could not start strategy process: {e}") from e
         self._current_strategy = bat_path.stem
 
-    def _run_elevated(self, command: str):
+    def _run_elevated(self, command: str, check: bool = True):
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
-                 f'Start-Process cmd -ArgumentList "/c {command}" -Verb RunAs -Wait'],
+                 f'$p = Start-Process cmd -ArgumentList "/c {command}" -Verb RunAs -Wait -PassThru; exit $p.ExitCode'],
                 capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=30
             )
-        except Exception:
-            pass
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError("Elevated command timed out") from e
+        except OSError as e:
+            raise RuntimeError(f"Could not run elevated command: {e}") from e
+
+        if check and result.returncode != 0:
+            details = (result.stderr or result.stdout or "").strip()
+            if details:
+                raise RuntimeError(f"Elevated command failed: {details}")
+            raise RuntimeError(f"Elevated command failed with exit code {result.returncode}")
 
     def _kill_taskkill(self) -> bool:
         result = subprocess.run(
@@ -100,7 +114,7 @@ class ZapretManager:
 
     def stop(self):
         if self._is_service_installed():
-            self._run_elevated("net stop zapret & sc delete zapret & taskkill /IM winws.exe /F")
+            self._run_elevated("net stop zapret & sc delete zapret & taskkill /IM winws.exe /F", check=False)
         self._kill_taskkill()
         self._kill_powershell()
         if self._process:

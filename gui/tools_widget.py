@@ -8,7 +8,6 @@ from pathlib import Path
 import ctypes
 import re
 import subprocess
-import tempfile
 import sys
 from core.diagnostics import run_diagnostics
 
@@ -101,6 +100,11 @@ class TestWorker(QThread):
             self.finished_signal.emit(1, "test zapret.ps1 not found", "")
             return
 
+        if not self._find_test_configs():
+            self.finished_signal.emit(1, "No test configs found in zapret folder", "")
+            return
+
+        temp_script = test_ps.with_name("test zapret.gui.ps1")
         try:
             source = test_ps.read_text("utf-8", errors="ignore")
             source = re.sub(
@@ -108,7 +112,6 @@ class TestWorker(QThread):
                 "",
                 source,
             )
-            temp_script = Path(tempfile.gettempdir()) / "zapret-gui-test-runner.ps1"
             temp_script.write_text(source, encoding="utf-8")
 
             stdin_lines = [
@@ -133,15 +136,34 @@ class TestWorker(QThread):
             proc.stdin.write(stdin_text)
             proc.stdin.close()
 
+            recent_output = []
             for line in proc.stdout:
-                self.output.emit(line.rstrip())
+                clean = line.rstrip()
+                if clean:
+                    recent_output.append(clean)
+                    recent_output = recent_output[-8:]
+                self.output.emit(clean)
 
             exit_code = proc.wait()
             result_file = self._latest_result_file()
             best = self._read_best_strategy(result_file)
-            self.finished_signal.emit(exit_code, str(result_file) if result_file else "", best)
+            detail = best
+            if exit_code != 0 and not result_file:
+                detail = "\n".join(recent_output)
+            self.finished_signal.emit(exit_code, str(result_file) if result_file else "", detail)
         except Exception as e:
             self.finished_signal.emit(1, "", str(e))
+        finally:
+            try:
+                temp_script.unlink()
+            except OSError:
+                pass
+
+    def _find_test_configs(self):
+        return [
+            p for p in self.zapret_path.glob("*.bat")
+            if not p.name.lower().startswith("service")
+        ]
 
     def _latest_result_file(self):
         results_dir = self.zapret_path / "utils" / "test results"
@@ -157,6 +179,18 @@ class TestWorker(QThread):
             if line.lower().startswith("best strategy:"):
                 return line
         return ""
+
+
+class IPSetUpdateWorker(QThread):
+    finished_signal = Signal(bool, str)
+
+    def __init__(self, service_controller):
+        super().__init__()
+        self.sc = service_controller
+
+    def run(self):
+        success, msg = self.sc.update_ipset()
+        self.finished_signal.emit(success, msg)
 
 
 class ToolsWidget(QWidget):
@@ -209,8 +243,25 @@ class ToolsWidget(QWidget):
         layout.addStretch()
 
     def _update_ipset(self):
-        self.sc.update_ipset()
-        self.log.log("IPSet update launched", "system")
+        self.btn_ipset.setEnabled(False)
+        self.diag_output.clear()
+        self.diag_output.append("Updating IPSet list...")
+        self.log.log("Updating IPSet list...", "system")
+        self._ipset_worker = IPSetUpdateWorker(self.sc)
+        self._ipset_worker.finished_signal.connect(self._on_ipset_done)
+        self._ipset_worker.start()
+
+    def _on_ipset_done(self, success: bool, msg: str):
+        self.btn_ipset.setEnabled(True)
+        self.diag_output.append(msg)
+        if success:
+            status = self.sc.ipset_filter_status()
+            self.diag_output.append(f"IPSet status: {status}")
+            self.log.log(msg, "ok")
+            self.log.log(f"IPSet status: {status}", "system")
+        else:
+            self.log.log(msg, "error")
+            QMessageBox.critical(self, "IPSet update failed", msg)
 
     def _update_hosts(self):
         self.log.log("Updating hosts file...", "system")

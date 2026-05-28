@@ -1,6 +1,7 @@
 import requests
 import zipfile
 import io
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -69,11 +70,27 @@ def _extract_zip(data, install_path, progress_callback=None, log_callback=None):
             target = install_path / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src:
-                target.write_bytes(src.read())
+                _write_file_with_retry(target, src.read())
             if progress_callback and total:
                 progress_callback(int((i + 1) / total * 100))
             if log_callback:
                 log_callback(f"Extracted: {rel}")
+
+
+def _write_file_with_retry(target: Path, data: bytes, attempts: int = 5, delay: float = 1.0):
+    for attempt in range(1, attempts + 1):
+        try:
+            target.write_bytes(data)
+            return
+        except PermissionError as e:
+            if attempt == attempts:
+                if target.name.lower() == "windivert64.sys":
+                    raise PermissionError(
+                        f"{e}. WinDivert driver is still running. "
+                        "Reboot or remove the driver, then update again."
+                    ) from e
+                raise
+            time.sleep(delay)
 
 
 def install_update(

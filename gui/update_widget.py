@@ -137,10 +137,14 @@ class UpdateWidget(QWidget):
         self.btn_check.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setValue(0)
-        self.status_log.append("Stopping zapret before update...")
-        self.log.log("Stopping zapret before update...", "system")
+        self.status_log.append("Preparing zapret for update...")
+        self.status_log.append("Stopping zapret, winws.exe and WinDivert drivers...")
+        self.status_log.append("Removing WinDivert services...")
+        self.log.log("Preparing zapret for update...", "system")
+        self.log.log("Stopping WinDivert driver before update...", "system")
+        self.log.log("Removing WinDivert services before update...", "system")
         try:
-            self.zm.stop()
+            self.zm.prepare_for_update()
         except Exception as e:
             msg = f"Could not stop zapret before update: {e}"
             self.progress.setVisible(False)

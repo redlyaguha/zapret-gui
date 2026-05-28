@@ -2,6 +2,7 @@ import subprocess
 import re
 import tempfile
 from pathlib import Path
+import requests
 
 
 class ServiceController:
@@ -139,15 +140,19 @@ class ServiceController:
     def update_ipset(self):
         url = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/ipset-service.txt"
         out_file = self.zapret_path / "lists" / "ipset-all.txt"
-        script = f"""
-$url = '{url}'
-$out = '{out_file}'
-$dir = Split-Path -Parent $out
-if (-not (Test-Path $dir)) {{ New-Item -ItemType Directory -Path $dir | Out-Null }}
-$res = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing
-if ($res.StatusCode -eq 200) {{ $res.Content | Out-File -FilePath $out -Encoding UTF8 }}
-"""
-        self._run_ps(script)
+        try:
+            response = requests.get(url, timeout=15)
+            response.raise_for_status()
+            content = response.text.strip()
+            if not content:
+                return False, "Downloaded IPSet list is empty"
+
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            out_file.write_text(content + "\n", encoding="utf-8")
+            entries = sum(1 for line in content.splitlines() if line.strip())
+            return True, f"IPSet updated: {entries} entries"
+        except Exception as e:
+            return False, f"IPSet update failed: {e}"
 
     def update_hosts(self):
         url = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts"

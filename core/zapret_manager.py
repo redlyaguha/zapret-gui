@@ -183,6 +183,56 @@ class ZapretManager:
             self._process = None
         self._current_strategy = None
 
+    def prepare_for_update(self):
+        cleanup_script = (
+            'echo Stopping zapret... & '
+            'net stop zapret >nul 2>&1 & '
+            'sc delete zapret >nul 2>&1 & '
+            'taskkill /IM winws.exe /F >nul 2>&1 & '
+            'echo Stopping WinDivert driver... & '
+            'net stop WinDivert >nul 2>&1 & '
+            'echo Removing WinDivert service... & '
+            'sc delete WinDivert >nul 2>&1 & '
+            'echo Stopping WinDivert14 driver... & '
+            'net stop WinDivert14 >nul 2>&1 & '
+            'echo Removing WinDivert14 service... & '
+            'sc delete WinDivert14 >nul 2>&1'
+        )
+        self._run_elevated(cleanup_script, check=False)
+        self._kill_taskkill()
+        self._kill_powershell()
+        blockers = self._update_blockers()
+        if blockers:
+            joined = ", ".join(blockers)
+            raise RuntimeError(
+                f"Update blocked: {joined} still running. "
+                "Reboot or remove the driver/service, then update again."
+            )
+        if self._process:
+            self._process = None
+        self._current_strategy = None
+
+    def _update_blockers(self):
+        blockers = []
+        if self._is_winws_running():
+            blockers.append("winws.exe")
+        for service in ("zapret", "WinDivert", "WinDivert14"):
+            if self._service_is_active(service):
+                blockers.append(service)
+        return blockers
+
+    def _service_is_active(self, name: str) -> bool:
+        result = subprocess.run(
+            ["sc", "query", name],
+            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if result.returncode != 0:
+            return False
+        for line in result.stdout.splitlines():
+            if "STATE" in line:
+                return "STOPPED" not in line
+        return False
+
     def _get_strategy_from_service(self) -> Optional[str]:
         result = subprocess.run(
             ["reg", "query", r"HKLM\System\CurrentControlSet\Services\zapret",

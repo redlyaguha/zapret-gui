@@ -2,6 +2,8 @@ from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QAction
 from PySide6.QtCore import Signal, QObject
 
+from core.assets import get_asset_path
+
 
 class TrayManager(QObject):
     show_window = Signal()
@@ -10,8 +12,9 @@ class TrayManager(QObject):
     def __init__(self, parent):
         super().__init__(parent)
         self.parent = parent
+        self.icon = QIcon(str(get_asset_path("assets/app_icon.ico")))
         self.tray = QSystemTrayIcon(parent)
-        self.tray.setIcon(QIcon.fromTheme("network-wired"))
+        self.tray.setIcon(self.icon)
         self.tray.setToolTip("zapret-gui")
 
         self.menu = QMenu(parent)
@@ -40,5 +43,3 @@ class TrayManager(QObject):
     def set_status(self, running: bool):
         status = "Running" if running else "Stopped"
         self.tray.setToolTip(f"zapret-gui — {status}")
-        icon = "network-transmit" if running else "network-idle"
-        self.tray.setIcon(QIcon.fromTheme(icon))

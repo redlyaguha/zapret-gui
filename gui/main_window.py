@@ -4,11 +4,13 @@ from PySide6.QtWidgets import (
     QDialog, QProgressBar, QSystemTrayIcon
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtGui import QIcon
 
 from pathlib import Path
 import json
 import sys
 
+from core.assets import get_asset_path
 from core.zapret_manager import ZapretManager
 from core.service_controller import ServiceController
 
@@ -142,6 +144,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("zapret-gui")
+        self.setWindowIcon(QIcon(str(get_asset_path("assets/app_icon.ico"))))
         self.setMinimumSize(850, 600)
 
         self.zapret_path = self._load_config()

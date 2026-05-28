@@ -1,5 +1,6 @@
 import subprocess
 import re
+import tempfile
 from pathlib import Path
 
 
@@ -150,18 +151,70 @@ if ($res.StatusCode -eq 200) {{ $res.Content | Out-File -FilePath $out -Encoding
 
     def update_hosts(self):
         url = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts"
-        temp = self.zapret_path / "temp_hosts.txt"
-        hosts = Path(r"C:\Windows\System32\drivers\etc\hosts")
+        log_file = Path(tempfile.gettempdir()) / "zapret-gui-hosts-update.log"
         script = f"""
 $url = '{url}'
-$out = '{temp}'
+$hosts = 'C:\\Windows\\System32\\drivers\\etc\\hosts'
+$backup = 'C:\\Windows\\System32\\drivers\\etc\\hosts.zapret-gui.bak'
+$begin = '# BEGIN zapret-gui'
+$end = '# END zapret-gui'
+Write-Output 'Downloading hosts data...'
 $res = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing
-if ($res.StatusCode -eq 200) {{ $res.Content | Out-File -FilePath $out -Encoding UTF8 }}
-Write-Host "Downloaded to {temp}. Open and copy to {hosts} manually."
-start notepad '{temp}'
-start explorer /select,'{hosts}'
+if ($res.StatusCode -ne 200) {{ throw "Download failed with HTTP $($res.StatusCode)" }}
+$block = ($res.Content -replace "`r`n", "`n").Trim()
+if (-not $block) {{ throw 'Downloaded hosts data is empty' }}
+Write-Output 'Creating backup...'
+Copy-Item -LiteralPath $hosts -Destination $backup -Force
+$current = ''
+if (Test-Path -LiteralPath $hosts) {{
+    $current = Get-Content -LiteralPath $hosts -Raw -Encoding UTF8
+}}
+$pattern = '(?s)\\r?\\n?# BEGIN zapret-gui\\r?\\n.*?\\r?\\n# END zapret-gui\\r?\\n?'
+$managed = "$begin`r`n$block`r`n$end`r`n"
+if ($current -match $pattern) {{
+    $updated = [regex]::Replace($current, $pattern, "`r`n$managed", 1)
+}} else {{
+    $separator = if ($current.Trim().Length -gt 0) {{ "`r`n" }} else {{ "" }}
+    $updated = $current.TrimEnd() + $separator + $managed
+}}
+Set-Content -LiteralPath $hosts -Value $updated -Encoding UTF8 -Force
+Write-Output 'Hosts file updated successfully.'
 """
-        self._run_ps(script)
+        return self._run_elevated_ps(script, log_file)
+
+    def _ps_quote(self, value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    def _run_elevated_ps(self, script: str, log_file: Path):
+        script_file = Path(tempfile.gettempdir()) / "zapret-gui-hosts-update.ps1"
+        wrapped = (
+            "$ErrorActionPreference = 'Stop'\n"
+            f"try {{\n{script}\n}}\n"
+            "catch {\n"
+            "    Write-Output (\"ERROR: \" + $_.Exception.Message)\n"
+            "    exit 1\n"
+            "}\n"
+        )
+        script_file.write_text(wrapped, encoding="utf-8")
+        command = (
+            f'powershell -NoProfile -ExecutionPolicy Bypass -File "{script_file}" '
+            f'> "{log_file}" 2>&1'
+        )
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                f'$p = Start-Process -FilePath cmd.exe -ArgumentList @("/c", {self._ps_quote(command)}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode'
+            ],
+            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        details = ""
+        if log_file.exists():
+            details = log_file.read_text("utf-8", errors="ignore").strip()
+        if result.returncode != 0:
+            if not details:
+                details = (result.stderr or result.stdout or "UAC was cancelled or hosts update failed").strip()
+            return False, details
+        return True, details or "Hosts file updated successfully."
 
     def _run_ps(self, script):
         subprocess.Popen(

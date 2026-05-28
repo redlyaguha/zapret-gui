@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QProgressBar, QTextEdit, QGroupBox
+    QProgressBar, QTextEdit, QGroupBox, QMessageBox
 )
 from PySide6.QtCore import QThread, Signal
 from updater.auto_updater import get_latest_version, get_release_info, download_release, install_update
@@ -121,10 +121,35 @@ class UpdateWidget(QWidget):
             self.lbl_latest.setText(f"Latest: {self.zm.get_local_version()}")
 
     def _update(self):
+        reply = QMessageBox.warning(
+            self,
+            "Stop zapret before update",
+            "Download & Install will stop all running zapret methods before replacing files.\n\n"
+            "winws.exe and the zapret service will be stopped. After the update, start your method again manually.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            self.log.log("Update cancelled by user", "warn")
+            return
+
         self.btn_update.setEnabled(False)
         self.btn_check.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setValue(0)
+        self.status_log.append("Stopping zapret before update...")
+        self.log.log("Stopping zapret before update...", "system")
+        try:
+            self.zm.stop()
+        except Exception as e:
+            msg = f"Could not stop zapret before update: {e}"
+            self.progress.setVisible(False)
+            self.btn_check.setEnabled(True)
+            self.btn_update.setEnabled(True)
+            self.status_log.append(msg)
+            self.log.log(msg, "error")
+            QMessageBox.critical(self, "Update blocked", msg)
+            return
 
         self._worker = UpdateWorker("download", self.zm.zapret_path, self.zm.get_local_version())
         self._worker.progress.connect(self.progress.setValue)

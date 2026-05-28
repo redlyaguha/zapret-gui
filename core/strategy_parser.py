@@ -9,26 +9,69 @@ def find_strategies(zapret_path: Path):
     return strategies
 
 
+def _is_comment(line: str) -> bool:
+    stripped = line.strip().lower()
+    return stripped.startswith("rem") or stripped.startswith("::")
+
+
+def _strip_line_continuation(line: str):
+    stripped = line.strip()
+    if stripped.endswith("^"):
+        return stripped[:-1].rstrip(), True
+    return stripped, False
+
+
+def _extract_winws_command(content: str) -> str:
+    lines = content.splitlines()
+    command_parts = []
+    capturing = False
+
+    for line in lines:
+        if not capturing:
+            if _is_comment(line) or "winws.exe" not in line.lower():
+                continue
+            capturing = True
+
+        part, continues = _strip_line_continuation(line)
+        if part:
+            command_parts.append(part)
+
+        if capturing and not continues:
+            break
+
+    return " ".join(command_parts)
+
+
+def _split_batch_command(command: str):
+    return re.findall(r'"[^"]*"|\S+', command)
+
+
+def _strip_outer_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+        return value[1:-1]
+    return value
+
+
+def _unescape_batch_arg(value: str) -> str:
+    return value.replace("^!", "!")
+
+
 def parse_strategy(filepath: Path):
     with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
 
-    args_line = ""
-    for line in content.splitlines():
-        if "winws.exe" in line and not line.strip().startswith("rem") and not line.strip().startswith("::"):
-            args_line = line.strip()
-            break
+    command = _extract_winws_command(content)
 
     args_list = []
-    if args_line:
-        parts = re.findall(r'(?:--\w+(?:-\w+)*)(?:=(?:"[^"]*"|\S+))?|(?:"[^"]*"|\S+)', args_line)
+    if command:
+        parts = _split_batch_command(command)
         capture = False
         for p in parts:
-            if "winws.exe" in p:
+            if "winws.exe" in p.lower():
                 capture = True
                 continue
             if capture:
-                args_list.append(p.strip('"'))
+                args_list.append(_unescape_batch_arg(_strip_outer_quotes(p)))
 
     params = {}
     for a in args_list:

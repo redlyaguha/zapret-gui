@@ -1,6 +1,7 @@
 import subprocess
 import signal
 import re
+import tempfile
 from pathlib import Path
 from typing import Optional
 from core.strategy_parser import find_strategies, parse_strategy
@@ -57,9 +58,19 @@ class ZapretManager:
         self.stop()
         if self._is_service_mode:
             info = parse_strategy(bat_path)
-            args_str = " ".join(info["args"]) if info["args"] else ""
+            args_str = self._build_service_args(info["args"])
             winws = str(self.zapret_path / "bin" / "winws.exe")
-            svc_script = f'sc stop zapret >nul 2>&1 & sc delete zapret >nul 2>&1 & sc create zapret binPath= "\"{winws}\" {args_str}" DisplayName= "zapret" start= auto >nul & sc start zapret >nul'
+            bin_path = f'\\"{winws}\\" {args_str}'.strip()
+            svc_script = (
+                f'net stop zapret >nul 2>&1 & '
+                f'sc delete zapret >nul 2>&1 & '
+                f'{self._tcp_enable_command()} & '
+                f'sc create zapret binPath= "{bin_path}" DisplayName= "zapret" start= auto && '
+                f'sc description zapret "Zapret DPI bypass software" && '
+                f'sc start zapret && '
+                f'reg add "HKLM\\System\\CurrentControlSet\\Services\\zapret" '
+                f'/v zapret-discord-youtube /t REG_SZ /d "{bat_path.stem}" /f'
+            )
             self._run_elevated(svc_script)
         else:
             try:
@@ -73,11 +84,55 @@ class ZapretManager:
                 raise RuntimeError(f"Could not start strategy process: {e}") from e
         self._current_strategy = bat_path.stem
 
+    def _game_filter_ports(self):
+        flag_file = self.zapret_path / "utils" / "game_filter.enabled"
+        mode = ""
+        if flag_file.exists():
+            mode = flag_file.read_text("utf-8", errors="ignore").strip().lower()
+
+        if mode == "all":
+            return "1024-65535", "1024-65535", "1024-65535"
+        if mode == "tcp":
+            return "1024-65535", "1024-65535", "12"
+        if mode == "udp":
+            return "1024-65535", "12", "1024-65535"
+        return "12", "12", "12"
+
+    def _build_service_args(self, args):
+        game_filter, game_filter_tcp, game_filter_udp = self._game_filter_ports()
+        replacements = {
+            "%BIN%": str(self.zapret_path / "bin") + "\\",
+            "%LISTS%": str(self.zapret_path / "lists") + "\\",
+            "%GameFilter%": game_filter,
+            "%GameFilterTCP%": game_filter_tcp,
+            "%GameFilterUDP%": game_filter_udp,
+        }
+
+        prepared = []
+        for arg in args:
+            value = arg
+            for old, new in replacements.items():
+                value = value.replace(old, new)
+            prepared.append(value.replace('"', r'\"'))
+        return " ".join(prepared)
+
+    def _tcp_enable_command(self):
+        return (
+            'netsh interface tcp show global | findstr /i "timestamps" | '
+            'findstr /i "enabled" >nul || '
+            'netsh interface tcp set global timestamps=enabled >nul 2>&1'
+        )
+
+    def _ps_quote(self, value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
     def _run_elevated(self, command: str, check: bool = True):
+        log_file = Path(tempfile.gettempdir()) / "zapret-gui-elevated.log"
+        command_with_log = f'({command}) > "{log_file}" 2>&1'
         try:
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
-                 f'$p = Start-Process cmd -ArgumentList "/c {command}" -Verb RunAs -Wait -PassThru; exit $p.ExitCode'],
+                 f'$p = Start-Process -FilePath cmd.exe -ArgumentList @("/c", {self._ps_quote(command_with_log)}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode'],
                 capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=30
             )
         except subprocess.TimeoutExpired as e:
@@ -86,7 +141,10 @@ class ZapretManager:
             raise RuntimeError(f"Could not run elevated command: {e}") from e
 
         if check and result.returncode != 0:
-            details = (result.stderr or result.stdout or "").strip()
+            log_details = ""
+            if log_file.exists():
+                log_details = log_file.read_text("utf-8", errors="ignore").strip()
+            details = (log_details or result.stderr or result.stdout or "").strip()
             if details:
                 raise RuntimeError(f"Elevated command failed: {details}")
             raise RuntimeError(f"Elevated command failed with exit code {result.returncode}")

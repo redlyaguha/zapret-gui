@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QAction
 from PySide6.QtCore import Signal, QObject
 
+from core.app_info import get_display_name
 from core.assets import get_asset_path
 
 
@@ -15,7 +16,7 @@ class TrayManager(QObject):
         self.icon = QIcon(str(get_asset_path("assets/app_icon.ico")))
         self.tray = QSystemTrayIcon(parent)
         self.tray.setIcon(self.icon)
-        self.tray.setToolTip("zapret-gui")
+        self.tray.setToolTip(get_display_name())
 
         self.menu = QMenu(parent)
         self.action_show = QAction("Show/Hide", parent)
@@ -42,4 +43,4 @@ class TrayManager(QObject):
 
     def set_status(self, running: bool):
         status = "Running" if running else "Stopped"
-        self.tray.setToolTip(f"zapret-gui — {status}")
+        self.tray.setToolTip(f"{get_display_name()} - {status}")

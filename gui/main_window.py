@@ -10,6 +10,7 @@ from pathlib import Path
 import json
 import sys
 
+from core.app_info import APP_NAME, get_display_name
 from core.assets import get_asset_path
 from core.zapret_manager import ZapretManager
 from core.service_controller import ServiceController
@@ -23,7 +24,13 @@ from gui.tools_widget import ToolsWidget
 from updater.installer import install_zapret
 
 
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
+def get_config_file() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "config.json"
+    return Path(__file__).resolve().parent.parent / "config.json"
+
+
+CONFIG_FILE = get_config_file()
 
 
 class InstallWorker(QThread):
@@ -48,7 +55,7 @@ class InstallDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("zapret-gui — First Setup")
+        self.setWindowTitle(f"{get_display_name()} - First Setup")
         self.setFixedSize(550, 350)
         self.parent_path = Path.home() / "Documents"
         self._manual_path = None
@@ -57,7 +64,7 @@ class InstallDialog(QDialog):
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
-        title = QLabel("Welcome to zapret-gui!\nzapret needs to be downloaded and installed.")
+        title = QLabel(f"Welcome to {get_display_name()}!\nzapret needs to be downloaded and installed.")
         title.setStyleSheet("font-size: 14px; font-weight: bold;")
         layout.addWidget(title)
 
@@ -143,7 +150,7 @@ class InstallDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("zapret-gui")
+        self.setWindowTitle(get_display_name())
         self.setWindowIcon(QIcon(str(get_asset_path("assets/app_icon.ico"))))
         self.setMinimumSize(850, 600)
 
@@ -270,7 +277,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         event.ignore()
         self.hide()
-        self.tray.tray.showMessage("zapret-gui", "Still running in system tray", QSystemTrayIcon.MessageIcon.Information, 2000)
+        self.tray.tray.showMessage(APP_NAME, "Still running in system tray", QSystemTrayIcon.MessageIcon.Information, 2000)
 
     def _quit(self):
         self.tray.hide()

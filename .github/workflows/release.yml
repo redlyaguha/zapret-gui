@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build portable executable
+        shell: pwsh
+        run: ./scripts/build_windows.ps1
+
+      - name: Read app version
+        id: app_version
+        shell: pwsh
+        run: |
+          $version = ./.venv/Scripts/python.exe -c "from core.app_info import APP_VERSION; print(APP_VERSION)"
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Validate tag matches app version
+        shell: pwsh
+        run: |
+          $expected = "v${{ steps.app_version.outputs.version }}"
+          $actual = "${{ github.ref_name }}"
+          if ($actual -ne $expected) {
+            throw "Tag $actual does not match APP_VERSION $expected"
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: zapret-gui ${{ github.ref_name }}
+          files: dist/zapret-gui-v${{ steps.app_version.outputs.version }}-windows-x64.zip
+          generate_release_notes: true

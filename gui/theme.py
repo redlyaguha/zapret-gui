@@ -22,20 +22,20 @@ THEMES = {
         "field": "rgba(255, 255, 255, 18)",
     },
     "light": {
-        "bg": "#eef2f8",
-        "panel": "rgba(255, 255, 255, 226)",
+        "bg": "#f8fafc",
+        "panel": "rgba(255, 255, 255, 242)",
         "panel_solid": "#ffffff",
-        "panel_soft": "#f4f7fb",
-        "sidebar": "rgba(255, 255, 255, 234)",
+        "panel_soft": "#f3f6fa",
+        "sidebar": "rgba(255, 255, 255, 246)",
         "text": "#172033",
         "muted": "#667085",
-        "border": "rgba(26, 33, 48, 32)",
+        "border": "rgba(26, 33, 48, 24)",
         "accent": "#0a84ff",
         "accent_soft": "rgba(10, 132, 255, 34)",
         "success": "#178f54",
         "warning": "#b66b00",
         "danger": "#c73838",
-        "field": "rgba(23, 32, 51, 10)",
+        "field": "#f1f4f8",
     },
 }
 
@@ -214,16 +214,44 @@ def app_stylesheet(theme_name: str) -> str:
         background: {c["accent"]};
         color: white;
     }}
+    QFrame#SegmentedTrack {{
+        background: {c["field"]};
+        border: 1px solid {c["border"]};
+        border-radius: 20px;
+    }}
+    QFrame#SegmentThumb {{
+        background: {c["accent"]};
+        border-radius: 18px;
+    }}
+    QPushButton#SegmentFlat {{
+        border: 0;
+        background: transparent;
+        border-radius: 18px;
+        font-weight: 700;
+    }}
+    QPushButton#SegmentFlat:checked {{
+        color: white;
+    }}
+    QPushButton#SegmentFlat:pressed {{
+        padding-top: 4px;
+        padding-bottom: 4px;
+    }}
     QComboBox, QTextEdit, QListWidget {{
         background: {c["field"]};
         border: 1px solid {c["border"]};
         border-radius: 14px;
-        padding: 5px;
+        padding: 6px;
         selection-background-color: {c["accent"]};
     }}
-    QTextEdit#LogText, QScrollArea#LogScroll {{
+    QFrame#LogFrame {{
         border-radius: 16px;
         background: {c["field"]};
+        border: 1px solid {c["border"]};
+    }}
+    QScrollArea#LogScroll {{
+        border: 0;
+        border-radius: 16px;
+        background: transparent;
     }}
     QComboBox {{
         min-height: 26px;
@@ -231,8 +259,24 @@ def app_stylesheet(theme_name: str) -> str:
         padding: 3px 8px;
         min-width: 190px;
     }}
+    QComboBox::drop-down {{
+        border: 0;
+        width: 28px;
+        border-top-right-radius: 14px;
+        border-bottom-right-radius: 14px;
+        background: rgba(127, 139, 156, 20);
+    }}
+    QComboBox QAbstractItemView {{
+        background: {c["panel_solid"]};
+        color: {c["text"]};
+        border: 1px solid {c["border"]};
+        border-radius: 12px;
+        padding: 6px;
+        selection-background-color: {c["accent_soft"]};
+    }}
     QListWidget::item {{
-        padding: 9px;
+        padding: 9px 12px;
+        margin: 2px;
         border-radius: 10px;
     }}
     QListWidget::item:selected {{
@@ -244,17 +288,39 @@ def app_stylesheet(theme_name: str) -> str:
         background: transparent;
     }}
     QScrollBar:vertical {{
-        width: 12px;
+        width: 10px;
         background: transparent;
-        margin: 4px 2px 4px 2px;
+        margin: 8px 3px 8px 3px;
     }}
     QScrollBar::handle:vertical {{
-        background: {c["border"]};
+        background: rgba(127, 139, 156, 90);
         min-height: 34px;
-        border-radius: 6px;
+        border-radius: 5px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background: rgba(127, 139, 156, 135);
+    }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+        background: transparent;
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0;
+        border: 0;
+        background: transparent;
+    }}
+    QScrollBar:horizontal {{
+        height: 10px;
+        background: transparent;
+        margin: 3px 8px 3px 8px;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: rgba(127, 139, 156, 90);
+        min-width: 34px;
+        border-radius: 5px;
+    }}
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal,
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0;
         border: 0;
         background: transparent;
     }}

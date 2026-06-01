@@ -1,17 +1,82 @@
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
-    QListWidget, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout,
-    QWidget,
+    QListWidget, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
+from core.diagnostics import run_diagnostics
 from core.strategy_parser import find_strategies, parse_strategy
 from gui.effects import add_press_effect
 
 
 POLL_INTERVAL_MS = 1500
 POLL_MAX_ATTEMPTS = 15
+
+
+class SegmentedSwitch(QFrame):
+    changed = Signal(int)
+
+    def __init__(self, labels, parent=None):
+        super().__init__(parent)
+        self.labels = labels
+        self._index = 0
+        self.setObjectName("SegmentedTrack")
+        self.setFixedSize(236, 42)
+
+        self.thumb = QFrame(self)
+        self.thumb.setObjectName("SegmentThumb")
+        self.thumb.lower()
+
+        self.buttons = []
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(True)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(0)
+        for idx, label in enumerate(labels):
+            btn = QPushButton(label)
+            btn.setObjectName("SegmentFlat")
+            btn.setCheckable(True)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.clicked.connect(lambda _=False, i=idx: self.set_index(i))
+            self.group.addButton(btn, idx)
+            self.buttons.append(btn)
+            layout.addWidget(btn)
+        self.buttons[0].setChecked(True)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._place_thumb(animated=False)
+
+    def set_index(self, index: int, emit=True):
+        if index == self._index:
+            return
+        self._index = index
+        self.buttons[index].setChecked(True)
+        self._place_thumb(animated=True)
+        if emit:
+            self.changed.emit(index)
+
+    def _thumb_rect(self) -> QRect:
+        width = (self.width() - 6) // len(self.labels)
+        return QRect(3 + width * self._index, 3, width, self.height() - 6)
+
+    def _place_thumb(self, animated: bool):
+        rect = self._thumb_rect()
+        self.thumb.raise_()
+        for button in self.buttons:
+            button.raise_()
+        if animated:
+            self._animation = QPropertyAnimation(self.thumb, b"geometry", self)
+            self._animation.setStartValue(self.thumb.geometry())
+            self._animation.setEndValue(rect)
+            self._animation.setDuration(170)
+            self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._animation.start()
+        else:
+            self.thumb.setGeometry(rect)
 
 
 class StrategyWidget(QWidget):
@@ -66,15 +131,16 @@ class StrategyWidget(QWidget):
         header.addLayout(title_box, 1)
         self.lbl_mode_hint = QLabel("Процесс")
         self.lbl_mode_hint.setObjectName("Pill")
+        self.lbl_mode_hint.setMinimumWidth(92)
+        self.lbl_mode_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header.addWidget(self.lbl_mode_hint)
         root.addLayout(header)
 
         status_panel = QFrame()
         status_panel.setObjectName("GlassPanel")
-        status_panel.setMinimumHeight(148)
-        status_panel.setMaximumHeight(172)
+        status_panel.setMinimumHeight(172)
         status_layout = QVBoxLayout(status_panel)
-        status_layout.setContentsMargins(20, 18, 20, 20)
+        status_layout.setContentsMargins(20, 20, 20, 20)
         status_layout.setSpacing(12)
         self.lbl_status = QLabel("Отключено")
         self.lbl_status.setObjectName("HeroTitle")
@@ -98,7 +164,8 @@ class StrategyWidget(QWidget):
 
         strategy_panel = QFrame()
         strategy_panel.setObjectName("GlassPanel")
-        strategy_panel.setMinimumHeight(320)
+        self.strategy_panel = strategy_panel
+        self.strategy_panel.setMinimumHeight(360)
         strategy_layout = QVBoxLayout(strategy_panel)
         strategy_layout.setContentsMargins(16, 14, 16, 16)
         strategy_layout.setSpacing(12)
@@ -108,19 +175,13 @@ class StrategyWidget(QWidget):
 
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("Режим запуска"), 1)
-        self.mode_group = QButtonGroup(self)
-        self.mode_group.setExclusive(True)
-        self.btn_process = self._segment("Процесс")
-        self.btn_service = self._segment("Служба")
-        self.mode_group.addButton(self.btn_process, 0)
-        self.mode_group.addButton(self.btn_service, 1)
-        self.mode_group.idClicked.connect(self._on_mode_change)
-        mode_row.addWidget(self.btn_process)
-        mode_row.addWidget(self.btn_service)
+        self.mode_switch = SegmentedSwitch(["Процесс", "Служба"])
+        self.mode_switch.changed.connect(self._on_mode_change)
+        mode_row.addWidget(self.mode_switch)
         strategy_layout.addLayout(mode_row)
 
         self.list_widget = QListWidget()
-        self.list_widget.setMinimumHeight(120)
+        self.list_widget.setMinimumHeight(156)
         self.list_widget.currentRowChanged.connect(self._on_select)
         strategy_layout.addWidget(self.list_widget)
 
@@ -144,7 +205,8 @@ class StrategyWidget(QWidget):
         self.details = QTextEdit()
         self.details.setReadOnly(True)
         self.details.setVisible(False)
-        self.details.setMinimumHeight(120)
+        self.details.setObjectName("DetailsText")
+        self.details.setMinimumHeight(148)
         strategy_layout.addWidget(self.details)
         root.addWidget(strategy_panel, 1)
 
@@ -182,6 +244,16 @@ class StrategyWidget(QWidget):
         self.chk_autoupdate = QCheckBox("Проверять обновления zapret при запуске zapret")
         self.chk_autoupdate.toggled.connect(self._toggle_autoupdate)
         filter_layout.addWidget(self.chk_autoupdate)
+
+        tools_row = QHBoxLayout()
+        self.btn_diagnostics = QPushButton("Диагностика")
+        self.btn_diagnostics.setFixedHeight(36)
+        self.btn_diagnostics.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_diagnostics)
+        self.btn_diagnostics.clicked.connect(self._run_diagnostics)
+        tools_row.addWidget(self.btn_diagnostics)
+        tools_row.addStretch()
+        filter_layout.addLayout(tools_row)
         root.addWidget(filter_panel)
 
         log_panel = QFrame()
@@ -199,34 +271,35 @@ class StrategyWidget(QWidget):
         self.btn_expand_logs.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         add_press_effect(self.btn_expand_logs)
         self.btn_expand_logs.clicked.connect(self._toggle_logs)
+        self.btn_clear_logs = QPushButton("Очистить")
+        self.btn_clear_logs.setFixedHeight(34)
+        self.btn_clear_logs.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_clear_logs)
+        self.btn_clear_logs.clicked.connect(self.log.clear_log)
         log_header.addWidget(log_title)
         log_header.addStretch()
+        log_header.addWidget(self.btn_clear_logs)
         log_header.addWidget(self.btn_expand_logs)
         log_layout.addLayout(log_header)
         log_layout.addWidget(self.log)
         root.addWidget(log_panel)
         root.addStretch()
 
-    def _segment(self, text: str) -> QPushButton:
-        btn = QPushButton(text)
-        btn.setObjectName("Segment")
-        btn.setCheckable(True)
-        btn.setFixedHeight(36)
-        btn.setMinimumWidth(96)
-        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        add_press_effect(btn)
-        return btn
-
     def _toggle_logs(self):
         self._logs_expanded = not self._logs_expanded
-        target = 380 if self._logs_expanded else 172
+        target = 390 if self._logs_expanded else 172
         self.btn_expand_logs.setText("Свернуть" if self._logs_expanded else "Раскрыть")
-        self._log_animation = QPropertyAnimation(self.log_panel, b"maximumHeight", self)
-        self._log_animation.setStartValue(self.log_panel.maximumHeight())
-        self._log_animation.setEndValue(target)
-        self._log_animation.setDuration(180)
-        self._log_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._log_animation.start()
+        self._log_min_animation = QPropertyAnimation(self.log_panel, b"minimumHeight", self)
+        self._log_max_animation = QPropertyAnimation(self.log_panel, b"maximumHeight", self)
+        for animation, start in (
+            (self._log_min_animation, self.log_panel.minimumHeight()),
+            (self._log_max_animation, self.log_panel.maximumHeight()),
+        ):
+            animation.setStartValue(start)
+            animation.setEndValue(target)
+            animation.setDuration(180)
+            animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            animation.start()
 
     def _setting_row(self, label: QLabel, control: QWidget):
         row = QHBoxLayout()
@@ -257,10 +330,9 @@ class StrategyWidget(QWidget):
 
     def _auto_set_mode(self):
         is_service = self.zm._is_service_running()
-        self.btn_service.setChecked(is_service)
-        self.btn_process.setChecked(not is_service)
         self.zm.is_service_mode = is_service
         self.lbl_mode_hint.setText("Служба" if is_service else "Процесс")
+        self.mode_switch.set_index(1 if is_service else 0, emit=False)
 
     def _refresh_filters(self):
         self.cmb_game.blockSignals(True)
@@ -288,6 +360,8 @@ class StrategyWidget(QWidget):
     def _toggle_details(self, checked: bool):
         self._details_visible = checked
         self.details.setVisible(checked)
+        self.btn_details.setText("Скрыть подробности" if checked else "Подробности")
+        self.strategy_panel.setMinimumHeight(548 if checked else 360)
 
     def _toggle_power(self):
         if self.zm.is_running() and self._state not in ("starting", "stopping"):
@@ -438,10 +512,23 @@ class StrategyWidget(QWidget):
 
     def _set_ipset(self):
         mode = self.cmb_ipset.currentData()
-        self.sc.set_ipset_filter(mode)
+        try:
+            self.sc.set_ipset_filter(mode)
+        except Exception as e:
+            self.log.log(f"IPSet error: {e}", "error")
+            QMessageBox.critical(self, "IPSet", f"Не удалось изменить IPSet:\n{e}")
+            self._refresh_filters()
+            return
         self.lbl_ipset.setText(f"IPSet: {self.sc.ipset_filter_status()}")
         self.log.log(f"IPSet: {mode}", "system")
 
     def _toggle_autoupdate(self, checked: bool):
         self.sc.set_auto_update(checked)
         self.log.log(f"Проверка обновлений zapret: {'включена' if checked else 'выключена'}", "system")
+
+    def _run_diagnostics(self):
+        results = run_diagnostics(self.zm.zapret_path)
+        lines = [f"{name}: {status}" for name, status in results]
+        for line in lines:
+            self.log.log(line, "system")
+        QMessageBox.information(self, "Диагностика", "\n".join(lines))

@@ -102,6 +102,8 @@ class ServiceController:
                 backup_file.rename(list_file)
         elif mode == "none":
             if list_file.exists() and self.ipset_filter_status() == "loaded":
+                if backup_file.exists():
+                    backup_file.unlink()
                 list_file.rename(backup_file)
             list_file.write_text("203.0.113.113/32\n", encoding="utf-8")
         elif mode == "any":

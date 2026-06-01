@@ -1,8 +1,6 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QScrollArea
+from PySide6.QtWidgets import QFrame, QWidget, QVBoxLayout, QScrollArea
 from PySide6.QtCore import Signal, QDateTime, Qt
 from typing import Optional
-
-from gui.effects import add_press_effect
 
 
 class LogWidget(QWidget):
@@ -16,6 +14,11 @@ class LogWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        self.frame = QFrame()
+        self.frame.setObjectName("LogFrame")
+        frame_layout = QVBoxLayout(self.frame)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+
         self.scroll = QScrollArea()
         self.scroll.setObjectName("LogScroll")
         self.scroll.setWidgetResizable(True)
@@ -26,18 +29,8 @@ class LogWidget(QWidget):
         self.scroll_layout.setAlignment(self._align_top())
         self.scroll_layout.setSpacing(4)
         self.scroll.setWidget(self.scroll_content)
-
-        btn_layout = QHBoxLayout()
-        btn_clear = QPushButton("Очистить")
-        btn_clear.setFixedHeight(34)
-        btn_clear.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        add_press_effect(btn_clear)
-        btn_clear.clicked.connect(self.clear_log)
-        btn_layout.addStretch()
-        btn_layout.addWidget(btn_clear)
-
-        layout.addWidget(self.scroll)
-        layout.addLayout(btn_layout)
+        frame_layout.addWidget(self.scroll)
+        layout.addWidget(self.frame)
 
         self.log_received.connect(self._append_log_line)
 

@@ -22,7 +22,7 @@ from gui.app_update import AppUpdateInfo, check_app_update, open_releases
 from gui.config import load_config, save_config
 from gui.effects import add_press_effect
 from gui.log_widget import LogWidget
-from gui.strategy_widget import StrategyWidget
+from gui.strategy_widget import SegmentedSwitch, StrategyWidget
 from gui.theme import apply_app_theme, app_stylesheet
 from gui.tray_manager import TrayManager
 from updater.installer import install_zapret
@@ -202,14 +202,13 @@ class SettingsPage(QWidget):
         app_l = appearance.layout()
         row = QHBoxLayout()
         row.addWidget(QLabel("Тема"), 1)
-        self.cmb_theme = QComboBox()
-        self.cmb_theme.addItem("Системная", "system")
-        self.cmb_theme.addItem("Светлая", "light")
-        self.cmb_theme.addItem("Темная", "dark")
-        idx = self.cmb_theme.findData(self.config.get("theme", "system"))
-        self.cmb_theme.setCurrentIndex(max(0, idx))
-        self.cmb_theme.currentIndexChanged.connect(self._on_theme_change)
-        row.addWidget(self.cmb_theme)
+        self.theme_values = ["system", "light", "dark"]
+        self.theme_switch = SegmentedSwitch(["Системная", "Светлая", "Темная"])
+        self.theme_switch.setFixedSize(330, 42)
+        current_theme = self.config.get("theme", "system")
+        self.theme_switch.set_index(self.theme_values.index(current_theme) if current_theme in self.theme_values else 0, emit=False)
+        self.theme_switch.changed.connect(self._on_theme_change)
+        row.addWidget(self.theme_switch)
         app_l.addLayout(row)
 
         behavior = self._panel("Поведение")
@@ -297,8 +296,8 @@ class SettingsPage(QWidget):
         self.refresh_banner()
         self.config_changed.emit()
 
-    def _on_theme_change(self):
-        theme = self.cmb_theme.currentData()
+    def _on_theme_change(self, idx: int):
+        theme = self.theme_values[idx]
         self.config["theme"] = theme
         save_config(self.config)
         self.theme_changed.emit(theme)
@@ -372,7 +371,7 @@ class SettingsPage(QWidget):
             "deferred_app_update": None,
         })
         save_config(self.config)
-        self.cmb_theme.setCurrentIndex(self.cmb_theme.findData("system"))
+        self.theme_switch.set_index(0, emit=False)
         self.chk_no_tray.setChecked(False)
         self.chk_startup.setChecked(False)
         self.chk_logs.setChecked(True)
@@ -561,7 +560,7 @@ class MainWindow(QMainWindow):
         btn_menu.clicked.connect(self._toggle_sidebar)
         top.addWidget(btn_menu)
         if self.sidebar_expanded:
-            name = QLabel("zapret-gui")
+            name = QLabel("Меню управления")
             name.setObjectName("SectionTitle")
             top.addWidget(name)
         top.addStretch()
@@ -579,13 +578,18 @@ class MainWindow(QMainWindow):
             self.sidebar_layout.addWidget(btn)
 
         self.sidebar_layout.addStretch()
+        bottom = QWidget()
+        bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(8)
         for key in ["settings", "about"]:
             icon, text = self.nav_specs[key]
             btn = self._nav_button(icon, text)
             btn.clicked.connect(lambda _=False, k=key: self._switch_page(k))
             self.nav_group.addButton(btn)
             self.nav_buttons[key] = btn
-            self.sidebar_layout.addWidget(btn)
+            bottom_layout.addWidget(btn)
+        self.sidebar_layout.addWidget(bottom)
 
     def _nav_button(self, icon: str, text: str) -> QPushButton:
         label = f"{icon}  {text}" if self.sidebar_expanded else icon

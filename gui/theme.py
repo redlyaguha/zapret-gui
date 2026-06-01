@@ -213,7 +213,7 @@ def app_stylesheet(theme_name: str) -> str:
         text-align: center;
     }}
     QPushButton#SelectButton {{
-        min-height: 38px;
+        min-height: 40px;
         max-height: 40px;
         min-width: 270px;
         padding: 5px 16px;
@@ -244,7 +244,7 @@ def app_stylesheet(theme_name: str) -> str:
         border-radius: 11px;
         padding: 6px 16px;
         text-align: left;
-        min-height: 30px;
+        min-height: 38px;
         max-height: 38px;
         font-weight: 600;
     }}

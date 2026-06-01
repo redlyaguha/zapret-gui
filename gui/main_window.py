@@ -9,7 +9,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
-    QGraphicsOpacityEffect, QProgressBar, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
+    QGraphicsOpacityEffect, QProgressBar, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
     QSystemTrayIcon,
 )
 
@@ -171,7 +171,17 @@ class SettingsPage(QWidget):
         self._build_ui()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+
+        content = QWidget()
+        scroll.setWidget(content)
+        root = QVBoxLayout(content)
         root.setContentsMargins(22, 22, 22, 22)
         root.setSpacing(16)
 
@@ -198,16 +208,20 @@ class SettingsPage(QWidget):
 
         appearance = self._panel("Внешний вид")
         app_l = appearance.layout()
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Тема"), 1)
+        theme_row = QWidget()
+        theme_row.setFixedHeight(46)
+        row = QHBoxLayout(theme_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(14)
+        row.addWidget(QLabel("Тема"), 1, Qt.AlignmentFlag.AlignVCenter)
         self.theme_values = ["system", "light", "dark"]
         self.theme_switch = SegmentedSwitch(["Системная", "Светлая", "Темная"])
         self.theme_switch.setFixedSize(330, 42)
         current_theme = self.config.get("theme", "system")
         self.theme_switch.set_index(self.theme_values.index(current_theme) if current_theme in self.theme_values else 0, emit=False)
         self.theme_switch.changed.connect(self._on_theme_change)
-        row.addWidget(self.theme_switch)
-        app_l.addLayout(row)
+        row.addWidget(self.theme_switch, 0, Qt.AlignmentFlag.AlignVCenter)
+        app_l.addWidget(theme_row)
 
         behavior = self._panel("Поведение")
         behavior.setMinimumHeight(168)

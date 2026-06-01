@@ -1,4 +1,4 @@
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel,
     QListWidget, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
@@ -138,7 +138,7 @@ class DropdownSelect(QPushButton):
             layout.addWidget(item)
 
         self._popup = popup
-        popup.move(self.mapToGlobal(self.rect().bottomLeft()))
+        popup.move(self.mapToGlobal(self.rect().bottomLeft() + QPoint(0, 4)))
         popup.show()
 
     def _choose(self, index: int, popup: QWidget):
@@ -276,10 +276,10 @@ class StrategyWidget(QWidget):
 
         filter_panel = QFrame()
         filter_panel.setObjectName("GlassPanel")
-        filter_panel.setMinimumHeight(212)
+        filter_panel.setMinimumHeight(320)
         filter_layout = QVBoxLayout(filter_panel)
         filter_layout.setContentsMargins(16, 16, 16, 18)
-        filter_layout.setSpacing(16)
+        filter_layout.setSpacing(20)
         filter_title = QLabel("Фильтры")
         filter_title.setObjectName("SectionTitle")
         filter_layout.addWidget(filter_title)
@@ -295,10 +295,12 @@ class StrategyWidget(QWidget):
         filter_layout.addWidget(self._setting_row(self.lbl_ipset, self.ipset_select))
 
         self.chk_autoupdate = QCheckBox("Проверять обновления zapret при запуске zapret")
+        self.chk_autoupdate.setFixedHeight(32)
         self.chk_autoupdate.toggled.connect(self._toggle_autoupdate)
         filter_layout.addWidget(self.chk_autoupdate)
 
         tools_row = QHBoxLayout()
+        tools_row.setContentsMargins(0, 4, 0, 0)
         self.btn_diagnostics = QPushButton("Диагностика")
         self.btn_diagnostics.setObjectName("CompactButton")
         self.btn_diagnostics.setFixedHeight(36)
@@ -359,7 +361,7 @@ class StrategyWidget(QWidget):
     def _setting_row(self, label: QLabel, control: QWidget):
         row = QWidget()
         row.setObjectName("FilterRow")
-        row.setFixedHeight(46)
+        row.setFixedHeight(62)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(18)

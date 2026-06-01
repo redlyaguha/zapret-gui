@@ -572,7 +572,7 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self):
         self._clear_layout(self.sidebar_layout)
-        width = 232 if self.sidebar_expanded else 128
+        width = 232 if self.sidebar_expanded else 74
         self._set_sidebar_width(width)
 
         top = QHBoxLayout()
@@ -582,9 +582,10 @@ class MainWindow(QMainWindow):
         add_press_effect(btn_menu)
         btn_menu.clicked.connect(self._toggle_sidebar)
         top.addWidget(btn_menu)
-        name = QLabel("Меню")
-        name.setObjectName("SectionTitle")
-        top.addWidget(name)
+        if self.sidebar_expanded:
+            name = QLabel("Меню")
+            name.setObjectName("SectionTitle")
+            top.addWidget(name)
         top.addStretch()
         self.sidebar_layout.addLayout(top)
 
@@ -634,7 +635,7 @@ class MainWindow(QMainWindow):
         current = self._current_key()
         start_width = self.sidebar.width()
         self.sidebar_expanded = not self.sidebar_expanded
-        end_width = 232 if self.sidebar_expanded else 128
+        end_width = 232 if self.sidebar_expanded else 74
         self._sync_sidebar_labels()
 
         self._sidebar_animation = QVariantAnimation(self)

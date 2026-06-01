@@ -2,6 +2,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QS
 from PySide6.QtCore import Signal, QDateTime, Qt
 from typing import Optional
 
+from gui.effects import add_press_effect
+
 
 class LogWidget(QWidget):
     log_received = Signal(str, str)
@@ -15,18 +17,21 @@ class LogWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.scroll = QScrollArea()
+        self.scroll.setObjectName("LogScroll")
         self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("""
-            QScrollArea { border: 1px solid #333; background: #1e1e1e; }
-        """)
+        self.scroll.setMinimumHeight(74)
         self.scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setContentsMargins(10, 8, 10, 8)
         self.scroll_layout.setAlignment(self._align_top())
-        self.scroll_layout.setSpacing(2)
+        self.scroll_layout.setSpacing(4)
         self.scroll.setWidget(self.scroll_content)
 
         btn_layout = QHBoxLayout()
-        btn_clear = QPushButton("Clear")
+        btn_clear = QPushButton("Очистить")
+        btn_clear.setFixedHeight(34)
+        btn_clear.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(btn_clear)
         btn_clear.clicked.connect(self.clear_log)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_clear)
@@ -42,17 +47,17 @@ class LogWidget(QWidget):
 
     def log(self, message: str, level: str = "info"):
         ts = QDateTime.currentDateTime().toString("HH:mm:ss")
-        html = f'<span style="color:#888;">[{ts}]</span> '
+        html = f'<span style="color:#8b95a7;">[{ts}]</span> '
         if level == "ok":
-            html += f'<span style="color:#4caf50;">{message}</span>'
+            html += f'<span style="color:#53d18a;">{message}</span>'
         elif level == "error":
-            html += f'<span style="color:#f44336;">{message}</span>'
+            html += f'<span style="color:#ff6b6b;">{message}</span>'
         elif level == "warn":
-            html += f'<span style="color:#ff9800;">{message}</span>'
+            html += f'<span style="color:#ffbd4a;">{message}</span>'
         elif level == "system":
-            html += f'<span style="color:#64b5f6;">{message}</span>'
+            html += f'<span style="color:#58a6ff;">{message}</span>'
         else:
-            html += f'<span style="color:#ccc;">{message}</span>'
+            html += f'<span style="color:#d9dee8;">{message}</span>'
         html += "<br>"
         self.log_received.emit(html, "")
 

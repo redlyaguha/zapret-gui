@@ -1,10 +1,14 @@
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton,
-    QLabel, QTextEdit, QSplitter, QComboBox, QGroupBox, QCheckBox
-)
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
+    QListWidget, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout,
+    QWidget,
+)
+
 from core.strategy_parser import find_strategies, parse_strategy
+from gui.effects import add_press_effect
+
 
 POLL_INTERVAL_MS = 1500
 POLL_MAX_ATTEMPTS = 15
@@ -16,101 +20,223 @@ class StrategyWidget(QWidget):
         self.zm = zapret_manager
         self.sc = service_controller
         self.log = log_widget
+        self.strategies = []
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._on_poll_tick)
         self._poll_attempts = 0
-        self._poll_target = None  # "start" or "stop"
-        self._state = "idle"  # idle | starting | stopping | error
+        self._poll_target = None
+        self._state = "idle"
         self._pending_strategy_name = None
         self._last_error = None
+        self._details_visible = False
+        self._logs_expanded = False
         self._build_ui()
         self.refresh()
         self._auto_set_mode()
 
-    def _build_ui(self):
-        layout = QVBoxLayout(self)
+    def rebind(self, zapret_manager, service_controller):
+        self.zm = zapret_manager
+        self.sc = service_controller
+        self.refresh()
+        self._auto_set_mode()
 
-        header = QLabel("Available Strategies")
-        header.setStyleSheet("font-size: 14px; font-weight: bold; padding: 4px;")
-        layout.addWidget(header)
+    def _build_ui(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+
+        content = QWidget()
+        scroll.setWidget(content)
+        root = QVBoxLayout(content)
+        root.setContentsMargins(22, 22, 22, 22)
+        root.setSpacing(14)
+
+        header = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title = QLabel("DPI")
+        title.setObjectName("PageTitle")
+        subtitle = QLabel("Управление обходом DPI для выбранной стратегии zapret.")
+        subtitle.setObjectName("Muted")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header.addLayout(title_box, 1)
+        self.lbl_mode_hint = QLabel("Процесс")
+        self.lbl_mode_hint.setObjectName("Pill")
+        header.addWidget(self.lbl_mode_hint)
+        root.addLayout(header)
+
+        status_panel = QFrame()
+        status_panel.setObjectName("GlassPanel")
+        status_panel.setMinimumHeight(148)
+        status_panel.setMaximumHeight(172)
+        status_layout = QVBoxLayout(status_panel)
+        status_layout.setContentsMargins(20, 18, 20, 20)
+        status_layout.setSpacing(12)
+        self.lbl_status = QLabel("Отключено")
+        self.lbl_status.setObjectName("HeroTitle")
+        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_status_detail = QLabel("Выберите стратегию и нажмите «Включить».")
+        self.lbl_status_detail.setObjectName("Muted")
+        self.lbl_status_detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.btn_power = QPushButton("Включить")
+        self.btn_power.setObjectName("PrimaryButton")
+        self.btn_power.setFixedHeight(52)
+        self.btn_power.setMinimumWidth(320)
+        self.btn_power.setMaximumWidth(620)
+        self.btn_power.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_power.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_power)
+        self.btn_power.clicked.connect(self._toggle_power)
+        status_layout.addWidget(self.lbl_status)
+        status_layout.addWidget(self.lbl_status_detail)
+        status_layout.addWidget(self.btn_power, 0, Qt.AlignmentFlag.AlignHCenter)
+        root.addWidget(status_panel)
+
+        strategy_panel = QFrame()
+        strategy_panel.setObjectName("GlassPanel")
+        strategy_panel.setMinimumHeight(320)
+        strategy_layout = QVBoxLayout(strategy_panel)
+        strategy_layout.setContentsMargins(16, 14, 16, 16)
+        strategy_layout.setSpacing(12)
+        strategy_title = QLabel("Стратегия")
+        strategy_title.setObjectName("SectionTitle")
+        strategy_layout.addWidget(strategy_title)
 
         mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("Run mode:"))
-        self.cmb_mode = QComboBox()
-        self.cmb_mode.addItems(["Run as process", "Install as service"])
-        self.cmb_mode.currentIndexChanged.connect(self._on_mode_change)
-        mode_row.addWidget(self.cmb_mode, 1)
-        layout.addLayout(mode_row)
+        mode_row.addWidget(QLabel("Режим запуска"), 1)
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.setExclusive(True)
+        self.btn_process = self._segment("Процесс")
+        self.btn_service = self._segment("Служба")
+        self.mode_group.addButton(self.btn_process, 0)
+        self.mode_group.addButton(self.btn_service, 1)
+        self.mode_group.idClicked.connect(self._on_mode_change)
+        mode_row.addWidget(self.btn_process)
+        mode_row.addWidget(self.btn_service)
+        strategy_layout.addLayout(mode_row)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
         self.list_widget = QListWidget()
+        self.list_widget.setMinimumHeight(120)
         self.list_widget.currentRowChanged.connect(self._on_select)
-        left_layout.addWidget(self.list_widget)
+        strategy_layout.addWidget(self.list_widget)
 
-        btn_layout = QHBoxLayout()
-        self.btn_start = QPushButton("Start")
-        self.btn_start.clicked.connect(self._start)
-        self.btn_stop = QPushButton("Stop")
-        self.btn_stop.clicked.connect(self._stop)
-        self.btn_refresh = QPushButton("Refresh")
+        actions = QHBoxLayout()
+        self.btn_refresh = QPushButton("Обновить список")
+        self.btn_refresh.setFixedHeight(38)
+        self.btn_refresh.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_refresh)
         self.btn_refresh.clicked.connect(self.refresh)
-        btn_layout.addWidget(self.btn_start)
-        btn_layout.addWidget(self.btn_stop)
-        btn_layout.addWidget(self.btn_refresh)
-        left_layout.addLayout(btn_layout)
+        self.btn_details = QPushButton("Подробности")
+        self.btn_details.setFixedHeight(38)
+        self.btn_details.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_details)
+        self.btn_details.setCheckable(True)
+        self.btn_details.clicked.connect(self._toggle_details)
+        actions.addWidget(self.btn_refresh)
+        actions.addWidget(self.btn_details)
+        actions.addStretch()
+        strategy_layout.addLayout(actions)
 
-        self.lbl_running = QLabel("")
-        self.lbl_running.setStyleSheet("font-weight: bold; color: #2a6; padding: 4px;")
-        left_layout.addWidget(self.lbl_running)
-
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(QLabel("Arguments:"))
         self.details = QTextEdit()
         self.details.setReadOnly(True)
-        self.details.setStyleSheet("font-family: Consolas; font-size: 11px;")
-        right_layout.addWidget(self.details)
+        self.details.setVisible(False)
+        self.details.setMinimumHeight(120)
+        strategy_layout.addWidget(self.details)
+        root.addWidget(strategy_panel, 1)
 
-        splitter.addWidget(left)
-        splitter.addWidget(right)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        layout.addWidget(splitter)
-
-        filter_group = QGroupBox("Filters")
-        flt = QVBoxLayout(filter_group)
+        filter_panel = QFrame()
+        filter_panel.setObjectName("GlassPanel")
+        filter_panel.setMinimumHeight(168)
+        filter_layout = QVBoxLayout(filter_panel)
+        filter_layout.setContentsMargins(16, 14, 16, 16)
+        filter_layout.setSpacing(14)
+        filter_title = QLabel("Фильтры")
+        filter_title.setObjectName("SectionTitle")
+        filter_layout.addWidget(filter_title)
 
         self.lbl_game = QLabel("Game Filter: —")
         self.cmb_game = QComboBox()
-        self.cmb_game.addItems(["disabled", "all", "tcp", "udp"])
-        self.cmb_game.currentTextChanged.connect(self._set_game)
-        game_row = QHBoxLayout()
-        game_row.addWidget(self.lbl_game, 1)
-        game_row.addWidget(self.cmb_game)
-        flt.addLayout(game_row)
+        self.cmb_game.setMinimumWidth(230)
+        self.cmb_game.setFixedHeight(36)
+        self.cmb_game.addItem("Выключен", "disabled")
+        self.cmb_game.addItem("TCP и UDP", "all")
+        self.cmb_game.addItem("Только TCP", "tcp")
+        self.cmb_game.addItem("Только UDP", "udp")
+        self.cmb_game.currentIndexChanged.connect(self._set_game)
+        filter_layout.addLayout(self._setting_row(self.lbl_game, self.cmb_game))
 
-        self.lbl_ipset = QLabel("IPSet Filter: —")
+        self.lbl_ipset = QLabel("IPSet: —")
         self.cmb_ipset = QComboBox()
-        self.cmb_ipset.addItems(["loaded", "none", "any"])
-        self.cmb_ipset.currentTextChanged.connect(self._set_ipset)
-        ipset_row = QHBoxLayout()
-        ipset_row.addWidget(self.lbl_ipset, 1)
-        ipset_row.addWidget(self.cmb_ipset)
-        flt.addLayout(ipset_row)
+        self.cmb_ipset.setMinimumWidth(230)
+        self.cmb_ipset.setFixedHeight(36)
+        self.cmb_ipset.addItem("Загруженный список", "loaded")
+        self.cmb_ipset.addItem("Отключить список", "none")
+        self.cmb_ipset.addItem("Любой IP", "any")
+        self.cmb_ipset.currentIndexChanged.connect(self._set_ipset)
+        filter_layout.addLayout(self._setting_row(self.lbl_ipset, self.cmb_ipset))
 
-        self.chk_autoupdate = QCheckBox("Auto-Update Check")
+        self.chk_autoupdate = QCheckBox("Проверять обновления zapret при запуске zapret")
         self.chk_autoupdate.toggled.connect(self._toggle_autoupdate)
-        flt.addWidget(self.chk_autoupdate)
+        filter_layout.addWidget(self.chk_autoupdate)
+        root.addWidget(filter_panel)
 
-        layout.addWidget(filter_group)
+        log_panel = QFrame()
+        log_panel.setObjectName("GlassPanel")
+        self.log_panel = log_panel
+        self.log_panel.setMinimumHeight(172)
+        self.log_panel.setMaximumHeight(172)
+        log_layout = QVBoxLayout(log_panel)
+        log_layout.setContentsMargins(14, 12, 14, 14)
+        log_header = QHBoxLayout()
+        log_title = QLabel("Расширенные логи")
+        log_title.setObjectName("SectionTitle")
+        self.btn_expand_logs = QPushButton("Раскрыть")
+        self.btn_expand_logs.setFixedHeight(34)
+        self.btn_expand_logs.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_expand_logs)
+        self.btn_expand_logs.clicked.connect(self._toggle_logs)
+        log_header.addWidget(log_title)
+        log_header.addStretch()
+        log_header.addWidget(self.btn_expand_logs)
+        log_layout.addLayout(log_header)
+        log_layout.addWidget(self.log)
+        root.addWidget(log_panel)
+        root.addStretch()
+
+    def _segment(self, text: str) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setObjectName("Segment")
+        btn.setCheckable(True)
+        btn.setFixedHeight(36)
+        btn.setMinimumWidth(96)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(btn)
+        return btn
+
+    def _toggle_logs(self):
+        self._logs_expanded = not self._logs_expanded
+        target = 380 if self._logs_expanded else 172
+        self.btn_expand_logs.setText("Свернуть" if self._logs_expanded else "Раскрыть")
+        self._log_animation = QPropertyAnimation(self.log_panel, b"maximumHeight", self)
+        self._log_animation.setStartValue(self.log_panel.maximumHeight())
+        self._log_animation.setEndValue(target)
+        self._log_animation.setDuration(180)
+        self._log_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._log_animation.start()
+
+    def _setting_row(self, label: QLabel, control: QWidget):
+        row = QHBoxLayout()
+        row.addWidget(label, 1)
+        row.addWidget(control)
+        return row
 
     def _on_mode_change(self, idx: int):
-        self.zm.is_service_mode = (idx == 1)
+        self.zm.is_service_mode = idx == 1
+        self.lbl_mode_hint.setText("Служба" if self.zm.is_service_mode else "Процесс")
 
     def refresh(self):
         self._state = "idle"
@@ -119,17 +245,22 @@ class StrategyWidget(QWidget):
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
         self.strategies = find_strategies(self.zm.zapret_path)
-        for s in self.strategies:
-            self.list_widget.addItem(s.stem)
+        for strategy in self.strategies:
+            self.list_widget.addItem(strategy.stem)
         self.list_widget.blockSignals(False)
         if self.strategies:
             self.list_widget.setCurrentRow(0)
+        else:
+            self.details.setPlainText("Стратегии не найдены.")
         self._refresh_filters()
         self._update_status(auto_detect=True)
 
     def _auto_set_mode(self):
-        if self.zm._is_service_running():
-            self.cmb_mode.setCurrentIndex(1)
+        is_service = self.zm._is_service_running()
+        self.btn_service.setChecked(is_service)
+        self.btn_process.setChecked(not is_service)
+        self.zm.is_service_mode = is_service
+        self.lbl_mode_hint.setText("Служба" if is_service else "Процесс")
 
     def _refresh_filters(self):
         self.cmb_game.blockSignals(True)
@@ -137,7 +268,7 @@ class StrategyWidget(QWidget):
         self.chk_autoupdate.blockSignals(True)
 
         self.lbl_game.setText(f"Game Filter: {self.sc.game_filter_status()}")
-        self.lbl_ipset.setText(f"IPSet Filter: {self.sc.ipset_filter_status()}")
+        self.lbl_ipset.setText(f"IPSet: {self.sc.ipset_filter_status()}")
         self.chk_autoupdate.setChecked(self.sc.auto_update_status())
 
         self.cmb_game.blockSignals(False)
@@ -150,45 +281,60 @@ class StrategyWidget(QWidget):
             self._last_error = None
         if 0 <= idx < len(self.strategies):
             info = parse_strategy(self.strategies[idx])
-            args_text = "\n".join(info["args"]) if info["args"] else "No arguments found"
+            args_text = "\n".join(info["args"]) if info["args"] else "Аргументы не найдены."
             self.details.setPlainText(args_text)
         self._update_status()
 
+    def _toggle_details(self, checked: bool):
+        self._details_visible = checked
+        self.details.setVisible(checked)
+
+    def _toggle_power(self):
+        if self.zm.is_running() and self._state not in ("starting", "stopping"):
+            self._stop()
+        else:
+            self._start()
+
     def _start(self):
         idx = self.list_widget.currentRow()
-        if 0 <= idx < len(self.strategies):
-            bat = self.strategies[idx]
-            self._state = "starting"
-            self._pending_strategy_name = bat.stem
-            self._last_error = None
+        if not (0 <= idx < len(self.strategies)):
+            self._state = "error"
+            self._last_error = "Выберите стратегию"
             self._update_status()
-            mode = "service" if self.zm.is_service_mode else "process"
-            self.log.log(f"Starting strategy: {bat.stem} ({mode})", "system")
-            try:
-                self.zm.start_strategy(bat)
-            except Exception as e:
-                self._state = "error"
-                self._last_error = str(e) or "Start failed"
-                self._poll_timer.stop()
-                self._poll_target = None
-                self.log.log(f"Start failed: {self._last_error}", "error")
-                self._update_status()
-                return
-            self._start_poll("start")
+            return
+
+        bat = self.strategies[idx]
+        self._state = "starting"
+        self._pending_strategy_name = bat.stem
+        self._last_error = None
+        self._update_status()
+        mode = "служба" if self.zm.is_service_mode else "процесс"
+        self.log.log(f"Запуск стратегии: {bat.stem} ({mode})", "system")
+        try:
+            self.zm.start_strategy(bat)
+        except Exception as e:
+            self._state = "error"
+            self._last_error = str(e) or "Не удалось запустить"
+            self._poll_timer.stop()
+            self._poll_target = None
+            self.log.log(f"Ошибка запуска: {self._last_error}", "error")
+            self._update_status()
+            return
+        self._start_poll("start")
 
     def _stop(self):
         self._state = "stopping"
         self._last_error = None
         self._pending_strategy_name = self.zm.current_strategy
-        self.log.log("Stopping winws.exe...", "system")
+        self.log.log("Остановка winws.exe...", "system")
         try:
             self.zm.stop()
         except Exception as e:
             self._state = "error"
-            self._last_error = str(e) or "Stop failed"
+            self._last_error = str(e) or "Не удалось остановить"
             self._poll_timer.stop()
             self._poll_target = None
-            self.log.log(f"Stop failed: {self._last_error}", "error")
+            self.log.log(f"Ошибка остановки: {self._last_error}", "error")
             self._update_status()
             return
         self._start_poll("stop")
@@ -209,24 +355,20 @@ class StrategyWidget(QWidget):
             self._poll_target = None
             self._state = "idle"
             self._pending_strategy_name = None
-            self.log.log("Strategy started successfully", "ok")
+            self.log.log("Стратегия запущена", "ok")
             self._update_status()
         elif target == "stop" and not running:
             self._poll_timer.stop()
             self._poll_target = None
             self._state = "idle"
             self._pending_strategy_name = None
-            self.log.log("Stopped successfully", "ok")
+            self.log.log("Остановлено", "ok")
             self._update_status()
         elif self._poll_attempts >= POLL_MAX_ATTEMPTS:
             self._poll_timer.stop()
             self._poll_target = None
-            if target == "start":
-                self.log.log("Start timeout — check if winws.exe started", "error")
-                self._last_error = "Start timeout"
-            else:
-                self.log.log("Stop timeout — process may still be running", "error")
-                self._last_error = "Stop timeout"
+            self._last_error = "Таймаут запуска" if target == "start" else "Таймаут остановки"
+            self.log.log(self._last_error, "error")
             self._state = "error"
             self._update_status()
 
@@ -235,44 +377,38 @@ class StrategyWidget(QWidget):
         if auto_detect and running and not self.zm.current_strategy:
             self.zm.detect_strategy()
 
-        if self._state in ("starting", "stopping"):
-            self.btn_start.setEnabled(False)
-            self.btn_stop.setEnabled(False)
-        else:
-            self.btn_start.setEnabled(not running)
-            self.btn_stop.setEnabled(running)
+        busy = self._state in ("starting", "stopping")
+        self.btn_power.setEnabled(not busy)
+        self.btn_refresh.setEnabled(not busy)
+        self.list_widget.setEnabled(not busy and not running)
 
         if self._state == "starting":
-            name = self._pending_strategy_name or self.zm.current_strategy or "selected strategy"
-            self.lbl_running.setText(f"Starting: {name}")
-            self.lbl_running.setStyleSheet("font-weight: bold; color: #2196F3; padding: 4px;")
+            name = self._pending_strategy_name or "выбранная стратегия"
+            self._set_status("Запускается", f"Готовим стратегию «{name}».", "#58a6ff", "Запускается")
         elif self._state == "stopping":
-            self.lbl_running.setText("Stopping...")
-            self.lbl_running.setStyleSheet("font-weight: bold; color: #2196F3; padding: 4px;")
+            self._set_status("Останавливается", "Останавливаем процесс и службы zapret.", "#58a6ff", "Останавливается")
         elif self._state == "error":
-            msg = self._last_error or "Operation failed"
-            self.lbl_running.setText(f"Error: {msg}")
-            self.lbl_running.setStyleSheet("font-weight: bold; color: #f44336; padding: 4px;")
+            self._set_status("Ошибка", self._last_error or "Операция не выполнена.", "#ff6b6b", "Повторить")
         elif running:
-            cs = self.zm.current_strategy
-            if cs == "__service__":
-                self.lbl_running.setText("Running as Windows service")
-                self.lbl_running.setStyleSheet("font-weight: bold; color: #28a; padding: 4px;")
-            elif cs:
-                self.lbl_running.setText(f"Running: {cs}")
-                self.lbl_running.setStyleSheet("font-weight: bold; color: #2a6; padding: 4px;")
+            current = self.zm.current_strategy
+            if current == "__service__":
+                detail = "Работает как Windows-служба."
+            elif current:
+                detail = f"Активная стратегия: {current}"
             else:
-                self.lbl_running.setText("Running (unknown)")
-                self.lbl_running.setStyleSheet("font-weight: bold; color: #284; padding: 4px;")
+                detail = "zapret работает, но стратегия не определена."
+            self._set_status("Работает", detail, "#53d18a", "Отключить")
         else:
-            cs = self.zm.current_strategy
-            if cs and cs != "__service__":
-                self.lbl_running.setText(f"Starting: {cs}")
-                self.lbl_running.setStyleSheet("font-weight: bold; color: #284; padding: 4px;")
-            else:
-                self.lbl_running.setText("")
+            self._set_status("Отключено", "Выберите стратегию и нажмите «Включить».", "#a5adba", "Включить")
+
         self._highlight_current()
         return running
+
+    def _set_status(self, title: str, detail: str, color: str, button: str):
+        self.lbl_status.setText(title)
+        self.lbl_status.setStyleSheet(f"color: {color};")
+        self.lbl_status_detail.setText(detail)
+        self.btn_power.setText(button)
 
     def _highlight_current(self):
         current = self.zm.current_strategy
@@ -281,11 +417,11 @@ class StrategyWidget(QWidget):
 
         color = None
         if self._state in ("starting", "stopping"):
-            color = QColor("#2196F3")
+            color = QColor("#58a6ff")
         elif self._state == "error":
-            color = QColor("#f44336")
+            color = QColor("#ff6b6b")
         elif current and current != "__service__" and self.zm.is_running():
-            color = QColor("#4caf50")
+            color = QColor("#53d18a")
 
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
@@ -294,14 +430,18 @@ class StrategyWidget(QWidget):
             else:
                 item.setBackground(Qt.GlobalColor.transparent)
 
-    def _set_game(self, mode: str):
+    def _set_game(self):
+        mode = self.cmb_game.currentData()
         self.sc.set_game_filter(mode)
-        self.log.log(f"Game Filter set to: {mode}", "system")
+        self.lbl_game.setText(f"Game Filter: {self.sc.game_filter_status()}")
+        self.log.log(f"Game Filter: {mode}", "system")
 
-    def _set_ipset(self, mode: str):
+    def _set_ipset(self):
+        mode = self.cmb_ipset.currentData()
         self.sc.set_ipset_filter(mode)
-        self.log.log(f"IPSet Filter set to: {mode}", "system")
+        self.lbl_ipset.setText(f"IPSet: {self.sc.ipset_filter_status()}")
+        self.log.log(f"IPSet: {mode}", "system")
 
     def _toggle_autoupdate(self, checked: bool):
         self.sc.set_auto_update(checked)
-        self.log.log(f"Auto-Update: {'enabled' if checked else 'disabled'}", "system")
+        self.log.log(f"Проверка обновлений zapret: {'включена' if checked else 'выключена'}", "system")

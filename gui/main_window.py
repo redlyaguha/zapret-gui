@@ -235,11 +235,11 @@ class SettingsPage(QWidget):
         self.chk_startup.setChecked(self.config.get("launch_on_startup", False))
         self.chk_startup.toggled.connect(self._save_behavior)
         self.chk_logs = QCheckBox("Показывать расширенные логи")
-        self.chk_logs.setChecked(self.config.get("advanced_logs", True))
         self.chk_logs.toggled.connect(self._save_behavior)
         beh_l.addWidget(self._behavior_row(self.chk_no_tray))
         beh_l.addWidget(self._behavior_row(self.chk_startup))
         beh_l.addWidget(self._behavior_row(self.chk_logs))
+        self._sync_behavior_controls()
 
         updates = self._panel("Обновления zapret-gui")
         upd_l = updates.layout()
@@ -313,6 +313,20 @@ class SettingsPage(QWidget):
         self.update_banner.setVisible(bool(info))
         if info:
             self.update_text.setText(f"Доступно обновление zapret-gui: {info.get('latest_version', '')}")
+
+    def _sync_behavior_controls(self):
+        controls = (
+            self.chk_no_tray,
+            self.chk_startup,
+            self.chk_logs,
+        )
+        for control in controls:
+            control.blockSignals(True)
+        self.chk_no_tray.setChecked(not self.config.get("stay_open_on_close", True))
+        self.chk_startup.setChecked(self.config.get("launch_on_startup", False))
+        self.chk_logs.setChecked(self.config.get("advanced_logs", True))
+        for control in controls:
+            control.blockSignals(False)
 
     def _clear_deferred_update(self):
         self.config["deferred_app_update"] = None
@@ -396,9 +410,7 @@ class SettingsPage(QWidget):
         })
         save_config(self.config)
         self.theme_switch.set_index(0, emit=False)
-        self.chk_no_tray.setChecked(False)
-        self.chk_startup.setChecked(False)
-        self.chk_logs.setChecked(True)
+        self._sync_behavior_controls()
         self.refresh_banner()
         self.theme_changed.emit("system")
         self.config_changed.emit()
@@ -582,10 +594,10 @@ class MainWindow(QMainWindow):
         add_press_effect(btn_menu)
         btn_menu.clicked.connect(self._toggle_sidebar)
         top.addWidget(btn_menu)
-        if self.sidebar_expanded:
-            name = QLabel("Меню")
-            name.setObjectName("SectionTitle")
-            top.addWidget(name)
+        self.menu_label = QLabel("Меню")
+        self.menu_label.setObjectName("SectionTitle")
+        self.menu_label.setVisible(self.sidebar_expanded)
+        top.addWidget(self.menu_label)
         top.addStretch()
         self.sidebar_layout.addLayout(top)
 
@@ -648,6 +660,8 @@ class MainWindow(QMainWindow):
         self._sidebar_animation.start()
 
     def _sync_sidebar_labels(self):
+        if hasattr(self, "menu_label"):
+            self.menu_label.setVisible(self.sidebar_expanded)
         for key, btn in getattr(self, "nav_buttons", {}).items():
             icon, text = self.nav_specs[key]
             btn.setText(f"{icon}  {text}" if self.sidebar_expanded else icon)

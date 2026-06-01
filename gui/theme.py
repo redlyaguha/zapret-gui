@@ -213,10 +213,10 @@ def app_stylesheet(theme_name: str) -> str:
         text-align: center;
     }}
     QPushButton#SelectButton {{
-        min-height: 40px;
-        max-height: 40px;
+        min-height: 36px;
+        max-height: 36px;
         min-width: 270px;
-        padding: 5px 16px;
+        padding: 0 14px;
         border-radius: 18px;
         text-align: left;
         background: {c["field"]};
@@ -242,10 +242,10 @@ def app_stylesheet(theme_name: str) -> str:
         border: 0;
         background: transparent;
         border-radius: 11px;
-        padding: 6px 16px;
+        padding: 0 14px;
         text-align: left;
-        min-height: 38px;
-        max-height: 38px;
+        min-height: 34px;
+        max-height: 34px;
         font-weight: 600;
     }}
     QPushButton#SelectMenuItem:hover {{

@@ -1,6 +1,8 @@
+import time
+
 from PySide6.QtCore import QPoint, QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel,
     QListWidget, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
     QVBoxLayout, QWidget,
 )
@@ -8,6 +10,7 @@ from PySide6.QtWidgets import (
 from core.diagnostics import run_diagnostics
 from core.strategy_parser import find_strategies, parse_strategy
 from gui.effects import add_press_effect
+from gui.update_widget import UpdateWorker
 
 
 POLL_INTERVAL_MS = 1500
@@ -80,16 +83,18 @@ class SegmentedSwitch(QFrame):
 
 class DropdownSelect(QPushButton):
     changed = Signal(int)
+    _active = None
 
     def __init__(self, options, parent=None):
         super().__init__(parent)
         self.options = options
         self._index = 0
         self._popup = None
+        self._popup_closed_at = 0.0
         self.setObjectName("SelectButton")
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setFixedHeight(40)
-        self.setMinimumWidth(280)
+        self.setFixedHeight(36)
+        self.setMinimumWidth(260)
         self.clicked.connect(self._open_menu)
         self._sync_text()
 
@@ -108,14 +113,18 @@ class DropdownSelect(QPushButton):
         self.setText(f"{self.options[self._index]}  ▾")
 
     def _open_menu(self):
+        if time.monotonic() - self._popup_closed_at < 0.18:
+            return
         if self._popup and self._popup.isVisible():
             self._popup.close()
             return
+        if DropdownSelect._active and DropdownSelect._active is not self:
+            DropdownSelect._active.close_popup()
 
         popup = QWidget(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         popup.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        popup.destroyed.connect(lambda: setattr(self, "_popup", None))
+        popup.destroyed.connect(self._on_popup_destroyed)
         popup.setMinimumWidth(self.width())
         popup.setMaximumWidth(max(self.width(), 320))
 
@@ -133,17 +142,28 @@ class DropdownSelect(QPushButton):
             item.setObjectName("SelectMenuItem")
             item.setProperty("selected", idx == self._index)
             item.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            item.setFixedHeight(38)
+            item.setFixedHeight(34)
             item.clicked.connect(lambda _=False, i=idx, p=popup: self._choose(i, p))
             layout.addWidget(item)
 
         self._popup = popup
+        DropdownSelect._active = self
         popup.move(self.mapToGlobal(self.rect().bottomLeft() + QPoint(0, 4)))
         popup.show()
 
     def _choose(self, index: int, popup: QWidget):
         self.set_index(index)
         popup.close()
+
+    def _on_popup_destroyed(self):
+        self._popup = None
+        self._popup_closed_at = time.monotonic()
+        if DropdownSelect._active is self:
+            DropdownSelect._active = None
+
+    def close_popup(self):
+        if self._popup and self._popup.isVisible():
+            self._popup.close()
 
 
 class StrategyWidget(QWidget):
@@ -162,6 +182,7 @@ class StrategyWidget(QWidget):
         self._last_error = None
         self._details_visible = False
         self._logs_expanded = False
+        self._update_worker = None
         self.game_modes = ["disabled", "all", "tcp", "udp"]
         self.ipset_modes = ["loaded", "none", "any"]
         self._build_ui()
@@ -276,11 +297,11 @@ class StrategyWidget(QWidget):
 
         filter_panel = QFrame()
         filter_panel.setObjectName("GlassPanel")
-        filter_panel.setMinimumHeight(320)
+        filter_panel.setMinimumHeight(296)
         filter_layout = QVBoxLayout(filter_panel)
         filter_layout.setContentsMargins(16, 16, 16, 18)
-        filter_layout.setSpacing(20)
-        filter_title = QLabel("Фильтры")
+        filter_layout.setSpacing(12)
+        filter_title = QLabel("Инструменты")
         filter_title.setObjectName("SectionTitle")
         filter_layout.addWidget(filter_title)
 
@@ -294,23 +315,23 @@ class StrategyWidget(QWidget):
         self.ipset_select.changed.connect(self._set_ipset)
         filter_layout.addWidget(self._setting_row(self.lbl_ipset, self.ipset_select))
 
-        self.chk_autoupdate = QCheckBox("Проверять обновления zapret при запуске zapret")
-        self.chk_autoupdate.setFixedHeight(32)
-        self.chk_autoupdate.toggled.connect(self._toggle_autoupdate)
-        filter_layout.addWidget(self.chk_autoupdate)
+        self.btn_check_dpi_updates = QPushButton("Проверить обновления")
+        self.btn_check_dpi_updates.setObjectName("CompactButton")
+        self.btn_check_dpi_updates.setFixedHeight(34)
+        self.btn_check_dpi_updates.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_check_dpi_updates)
+        self.btn_check_dpi_updates.clicked.connect(self._check_dpi_updates)
+        filter_layout.addWidget(self._setting_row(QLabel("Обновления DPI"), self.btn_check_dpi_updates))
 
-        tools_row = QHBoxLayout()
-        tools_row.setContentsMargins(0, 4, 0, 0)
         self.btn_diagnostics = QPushButton("Диагностика")
         self.btn_diagnostics.setObjectName("CompactButton")
-        self.btn_diagnostics.setFixedHeight(36)
-        self.btn_diagnostics.setMaximumWidth(150)
+        self.btn_diagnostics.setText("Запустить")
+        self.btn_diagnostics.setFixedHeight(34)
+        self.btn_diagnostics.setMaximumWidth(130)
         self.btn_diagnostics.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         add_press_effect(self.btn_diagnostics)
         self.btn_diagnostics.clicked.connect(self._run_diagnostics)
-        tools_row.addWidget(self.btn_diagnostics)
-        tools_row.addStretch()
-        filter_layout.addLayout(tools_row)
+        filter_layout.addWidget(self._setting_row(QLabel("Запустить диагностику"), self.btn_diagnostics))
         root.addWidget(filter_panel)
 
         log_panel = QFrame()
@@ -361,7 +382,7 @@ class StrategyWidget(QWidget):
     def _setting_row(self, label: QLabel, control: QWidget):
         row = QWidget()
         row.setObjectName("FilterRow")
-        row.setFixedHeight(62)
+        row.setFixedHeight(50)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(18)
@@ -397,7 +418,6 @@ class StrategyWidget(QWidget):
     def _refresh_filters(self):
         self.game_select.blockSignals(True)
         self.ipset_select.blockSignals(True)
-        self.chk_autoupdate.blockSignals(True)
 
         game_status = self.sc.game_filter_status()
         ipset_status = self.sc.ipset_filter_status()
@@ -412,11 +432,9 @@ class StrategyWidget(QWidget):
             game_idx = 3
         self.game_select.set_index(game_idx, emit=False)
         self.ipset_select.set_index(self.ipset_modes.index(ipset_status) if ipset_status in self.ipset_modes else 0, emit=False)
-        self.chk_autoupdate.setChecked(self.sc.auto_update_status())
 
         self.game_select.blockSignals(False)
         self.ipset_select.blockSignals(False)
-        self.chk_autoupdate.blockSignals(False)
 
     def _on_select(self, idx: int):
         if self._state == "error":
@@ -582,9 +600,23 @@ class StrategyWidget(QWidget):
         self.lbl_ipset.setText(f"IPSet: {self.sc.ipset_filter_status()}")
         self.log.log(f"IPSet: {mode}", "system")
 
-    def _toggle_autoupdate(self, checked: bool):
-        self.sc.set_auto_update(checked)
-        self.log.log(f"Проверка обновлений zapret: {'включена' if checked else 'выключена'}", "system")
+    def _check_dpi_updates(self):
+        self.btn_check_dpi_updates.setEnabled(False)
+        self.log.log("Проверяем обновления DPI...", "system")
+        self._update_worker = UpdateWorker("check", self.zm.zapret_path, self.zm.get_local_version())
+        self._update_worker.log_msg.connect(self.log.log)
+        self._update_worker.finished_signal.connect(self._on_dpi_update_checked)
+        self._update_worker.start()
+
+    def _on_dpi_update_checked(self, is_current: bool, msg: str):
+        self.btn_check_dpi_updates.setEnabled(True)
+        is_error = msg.lower().startswith("error:")
+        level = "error" if is_error else ("ok" if is_current else "warn")
+        self.log.log(msg, level)
+        if is_error:
+            QMessageBox.warning(self, "Обновления DPI", msg)
+        else:
+            QMessageBox.information(self, "Обновления DPI", msg)
 
     def _run_diagnostics(self):
         results = run_diagnostics(self.zm.zapret_path)

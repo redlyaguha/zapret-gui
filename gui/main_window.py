@@ -572,7 +572,7 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self):
         self._clear_layout(self.sidebar_layout)
-        width = 232 if self.sidebar_expanded else 74
+        width = 232 if self.sidebar_expanded else 128
         self._set_sidebar_width(width)
 
         top = QHBoxLayout()
@@ -582,10 +582,9 @@ class MainWindow(QMainWindow):
         add_press_effect(btn_menu)
         btn_menu.clicked.connect(self._toggle_sidebar)
         top.addWidget(btn_menu)
-        if self.sidebar_expanded:
-            name = QLabel("Меню управления")
-            name.setObjectName("SectionTitle")
-            top.addWidget(name)
+        name = QLabel("Меню")
+        name.setObjectName("SectionTitle")
+        top.addWidget(name)
         top.addStretch()
         self.sidebar_layout.addLayout(top)
 
@@ -598,7 +597,7 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(lambda _=False, k=key: self._switch_page(k))
             self.nav_group.addButton(btn)
             self.nav_buttons[key] = btn
-            self.sidebar_layout.addWidget(btn)
+            self.sidebar_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.sidebar_layout.addStretch()
         bottom = QWidget()
@@ -611,7 +610,7 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(lambda _=False, k=key: self._switch_page(k))
             self.nav_group.addButton(btn)
             self.nav_buttons[key] = btn
-            bottom_layout.addWidget(btn)
+            bottom_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self.sidebar_layout.addWidget(bottom)
 
     def _nav_button(self, icon: str, text: str) -> QPushButton:
@@ -635,7 +634,7 @@ class MainWindow(QMainWindow):
         current = self._current_key()
         start_width = self.sidebar.width()
         self.sidebar_expanded = not self.sidebar_expanded
-        end_width = 232 if self.sidebar_expanded else 74
+        end_width = 232 if self.sidebar_expanded else 128
         self._sync_sidebar_labels()
 
         self._sidebar_animation = QVariantAnimation(self)

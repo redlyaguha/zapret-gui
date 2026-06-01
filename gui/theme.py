@@ -187,12 +187,17 @@ def app_stylesheet(theme_name: str) -> str:
         background: transparent;
         text-align: center;
         padding: 0;
-        border-radius: 17px;
+        border-radius: 18px;
         font-size: 15px;
         font-weight: 700;
-        min-width: 44px;
-        min-height: 44px;
-        max-height: 44px;
+        min-width: 48px;
+        min-height: 48px;
+        max-height: 48px;
+    }}
+    QPushButton#NavButton[expanded="true"] {{
+        text-align: left;
+        padding-left: 18px;
+        padding-right: 12px;
     }}
     QPushButton#NavButton:checked {{
         background: {c["accent_soft"]};
@@ -206,6 +211,25 @@ def app_stylesheet(theme_name: str) -> str:
         padding: 0;
         border-radius: 13px;
         text-align: center;
+    }}
+    QPushButton#SelectButton {{
+        min-height: 36px;
+        max-height: 38px;
+        min-width: 230px;
+        padding: 5px 14px;
+        border-radius: 16px;
+        text-align: left;
+        background: {c["field"]};
+    }}
+    QPushButton#SelectButton::menu-indicator {{
+        image: none;
+        width: 0;
+    }}
+    QPushButton#CompactButton {{
+        min-height: 30px;
+        max-height: 34px;
+        padding: 3px 12px;
+        border-radius: 15px;
     }}
     QPushButton#Segment {{
         border-radius: 17px;
@@ -287,6 +311,27 @@ def app_stylesheet(theme_name: str) -> str:
         padding: 6px;
         selection-background-color: {c["accent_soft"]};
     }}
+    QMenu {{
+        background: {c["panel_solid"]};
+        color: {c["text"]};
+        border: 1px solid {c["border"]};
+        border-radius: 14px;
+        padding: 6px;
+    }}
+    QMenu::item {{
+        padding: 8px 28px 8px 12px;
+        border-radius: 10px;
+        background: transparent;
+    }}
+    QMenu::item:selected {{
+        background: {c["accent_soft"]};
+        color: {c["text"]};
+    }}
+    QMenu::separator {{
+        height: 1px;
+        background: {c["border"]};
+        margin: 5px 8px;
+    }}
     QListWidget::item {{
         padding: 10px 12px;
         margin: 3px 4px;
@@ -340,11 +385,11 @@ def app_stylesheet(theme_name: str) -> str:
     }}
     QCheckBox {{
         spacing: 9px;
-        min-height: 24px;
+        min-height: 28px;
     }}
     QCheckBox::indicator {{
-        width: 17px;
-        height: 17px;
+        width: 18px;
+        height: 18px;
         border-radius: 5px;
         border: 1px solid {c["border"]};
         background: {c["field"]};

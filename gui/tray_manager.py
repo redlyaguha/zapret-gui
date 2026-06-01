@@ -19,9 +19,32 @@ class TrayManager(QObject):
         self.tray.setToolTip(get_display_name())
 
         self.menu = QMenu(parent)
-        self.action_show = QAction("Show/Hide", parent)
+        self.menu.setStyleSheet("""
+            QMenu {
+                background: #ffffff;
+                color: #172033;
+                border: 1px solid rgba(26, 33, 48, 32);
+                border-radius: 12px;
+                padding: 6px;
+            }
+            QMenu::item {
+                padding: 8px 28px 8px 12px;
+                border-radius: 9px;
+                background: transparent;
+            }
+            QMenu::item:selected {
+                background: rgba(10, 132, 255, 34);
+                color: #172033;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: rgba(26, 33, 48, 32);
+                margin: 5px 8px;
+            }
+        """)
+        self.action_show = QAction("Показать / скрыть", parent)
         self.action_show.triggered.connect(self.show_window)
-        self.action_quit = QAction("Exit", parent)
+        self.action_quit = QAction("Выход", parent)
         self.action_quit.triggered.connect(self.quit_app)
 
         self.menu.addAction(self.action_show)

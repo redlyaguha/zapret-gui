@@ -1,7 +1,7 @@
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel,
-    QListWidget, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
+    QListWidget, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -76,6 +76,42 @@ class SegmentedSwitch(QFrame):
             self._animation.start()
         else:
             self.thumb.setGeometry(rect)
+
+
+class DropdownSelect(QPushButton):
+    changed = Signal(int)
+
+    def __init__(self, options, parent=None):
+        super().__init__(parent)
+        self.options = options
+        self._index = 0
+        self.setObjectName("SelectButton")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedHeight(38)
+        self.setMinimumWidth(250)
+        self.clicked.connect(self._open_menu)
+        self._sync_text()
+
+    def set_index(self, index: int, emit=True):
+        if index < 0 or index >= len(self.options):
+            return
+        if index == self._index:
+            self._sync_text()
+            return
+        self._index = index
+        self._sync_text()
+        if emit:
+            self.changed.emit(index)
+
+    def _sync_text(self):
+        self.setText(f"{self.options[self._index]}  ▾")
+
+    def _open_menu(self):
+        menu = QMenu(self)
+        for idx, label in enumerate(self.options):
+            action = menu.addAction(label)
+            action.triggered.connect(lambda _=False, i=idx: self.set_index(i))
+        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
 
 
 class StrategyWidget(QWidget):
@@ -217,16 +253,14 @@ class StrategyWidget(QWidget):
         filter_layout.addWidget(filter_title)
 
         self.lbl_game = QLabel("Game Filter: —")
-        self.game_switch = SegmentedSwitch(["Выкл", "TCP+UDP", "TCP", "UDP"])
-        self.game_switch.setFixedSize(420, 42)
-        self.game_switch.changed.connect(self._set_game)
-        filter_layout.addLayout(self._setting_row(self.lbl_game, self.game_switch))
+        self.game_select = DropdownSelect(["Выключен", "TCP и UDP", "Только TCP", "Только UDP"])
+        self.game_select.changed.connect(self._set_game)
+        filter_layout.addLayout(self._setting_row(self.lbl_game, self.game_select))
 
         self.lbl_ipset = QLabel("IPSet: —")
-        self.ipset_switch = SegmentedSwitch(["Список", "Откл", "Любой IP"])
-        self.ipset_switch.setFixedSize(330, 42)
-        self.ipset_switch.changed.connect(self._set_ipset)
-        filter_layout.addLayout(self._setting_row(self.lbl_ipset, self.ipset_switch))
+        self.ipset_select = DropdownSelect(["Загруженный список", "Отключить список", "Любой IP"])
+        self.ipset_select.changed.connect(self._set_ipset)
+        filter_layout.addLayout(self._setting_row(self.lbl_ipset, self.ipset_select))
 
         self.chk_autoupdate = QCheckBox("Проверять обновления zapret при запуске zapret")
         self.chk_autoupdate.toggled.connect(self._toggle_autoupdate)
@@ -234,7 +268,9 @@ class StrategyWidget(QWidget):
 
         tools_row = QHBoxLayout()
         self.btn_diagnostics = QPushButton("Диагностика")
+        self.btn_diagnostics.setObjectName("CompactButton")
         self.btn_diagnostics.setFixedHeight(36)
+        self.btn_diagnostics.setMaximumWidth(150)
         self.btn_diagnostics.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         add_press_effect(self.btn_diagnostics)
         self.btn_diagnostics.clicked.connect(self._run_diagnostics)
@@ -320,8 +356,8 @@ class StrategyWidget(QWidget):
         self.mode_switch.set_index(1 if is_service else 0, emit=False)
 
     def _refresh_filters(self):
-        self.game_switch.blockSignals(True)
-        self.ipset_switch.blockSignals(True)
+        self.game_select.blockSignals(True)
+        self.ipset_select.blockSignals(True)
         self.chk_autoupdate.blockSignals(True)
 
         game_status = self.sc.game_filter_status()
@@ -335,12 +371,12 @@ class StrategyWidget(QWidget):
             game_idx = 2
         elif "(UDP)" in game_status:
             game_idx = 3
-        self.game_switch.set_index(game_idx, emit=False)
-        self.ipset_switch.set_index(self.ipset_modes.index(ipset_status) if ipset_status in self.ipset_modes else 0, emit=False)
+        self.game_select.set_index(game_idx, emit=False)
+        self.ipset_select.set_index(self.ipset_modes.index(ipset_status) if ipset_status in self.ipset_modes else 0, emit=False)
         self.chk_autoupdate.setChecked(self.sc.auto_update_status())
 
-        self.game_switch.blockSignals(False)
-        self.ipset_switch.blockSignals(False)
+        self.game_select.blockSignals(False)
+        self.ipset_select.blockSignals(False)
         self.chk_autoupdate.blockSignals(False)
 
     def _on_select(self, idx: int):

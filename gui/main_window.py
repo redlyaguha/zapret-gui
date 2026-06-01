@@ -220,9 +220,9 @@ class SettingsPage(QWidget):
         self.chk_logs = QCheckBox("Показывать расширенные логи")
         self.chk_logs.setChecked(self.config.get("advanced_logs", True))
         self.chk_logs.toggled.connect(self._save_behavior)
-        beh_l.addWidget(self.chk_no_tray)
-        beh_l.addWidget(self.chk_startup)
-        beh_l.addWidget(self.chk_logs)
+        beh_l.addWidget(self._behavior_row(self.chk_no_tray))
+        beh_l.addWidget(self._behavior_row(self.chk_startup))
+        beh_l.addWidget(self._behavior_row(self.chk_logs))
 
         updates = self._panel("Обновления zapret-gui")
         upd_l = updates.layout()
@@ -271,12 +271,23 @@ class SettingsPage(QWidget):
         panel = QFrame()
         panel.setObjectName("GlassPanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
         heading = QLabel(title)
         heading.setObjectName("SectionTitle")
         layout.addWidget(heading)
         return panel
+
+    def _behavior_row(self, checkbox: QCheckBox) -> QWidget:
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(10)
+        checkbox.setMinimumHeight(30)
+        row_layout.addWidget(checkbox)
+        row_layout.addStretch()
+        row.setMinimumHeight(32)
+        return row
 
     def refresh_banner(self):
         info = self.config.get("deferred_app_update")
@@ -508,7 +519,7 @@ class MainWindow(QMainWindow):
         self.sidebar = QFrame()
         self.sidebar.setObjectName("Sidebar")
         self.sidebar_layout = QVBoxLayout(self.sidebar)
-        self.sidebar_layout.setContentsMargins(10, 10, 10, 10)
+        self.sidebar_layout.setContentsMargins(12, 10, 12, 10)
         self.sidebar_layout.setSpacing(8)
         layout.addWidget(self.sidebar)
 
@@ -542,7 +553,7 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self):
         self._clear_layout(self.sidebar_layout)
-        width = 214 if self.sidebar_expanded else 62
+        width = 232 if self.sidebar_expanded else 74
         self._set_sidebar_width(width)
 
         top = QHBoxLayout()
@@ -591,11 +602,13 @@ class MainWindow(QMainWindow):
         btn.setCheckable(True)
         btn.setToolTip(text)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        btn.setFixedHeight(44)
+        btn.setProperty("expanded", self.sidebar_expanded)
+        btn.setFixedHeight(48)
         if self.sidebar_expanded:
-            btn.setMinimumWidth(178)
+            btn.setMinimumWidth(196)
+            btn.setMaximumWidth(196)
         else:
-            btn.setFixedWidth(44)
+            btn.setFixedWidth(48)
         add_press_effect(btn)
         return btn
 
@@ -603,7 +616,7 @@ class MainWindow(QMainWindow):
         current = self._current_key()
         start_width = self.sidebar.width()
         self.sidebar_expanded = not self.sidebar_expanded
-        end_width = 214 if self.sidebar_expanded else 62
+        end_width = 232 if self.sidebar_expanded else 74
         self._sync_sidebar_labels()
 
         self._sidebar_animation = QVariantAnimation(self)
@@ -619,12 +632,15 @@ class MainWindow(QMainWindow):
         for key, btn in getattr(self, "nav_buttons", {}).items():
             icon, text = self.nav_specs[key]
             btn.setText(f"{icon}  {text}" if self.sidebar_expanded else icon)
+            btn.setProperty("expanded", self.sidebar_expanded)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
             if self.sidebar_expanded:
-                btn.setMinimumWidth(178)
-                btn.setMaximumWidth(178)
+                btn.setMinimumWidth(196)
+                btn.setMaximumWidth(196)
             else:
-                btn.setMinimumWidth(44)
-                btn.setMaximumWidth(44)
+                btn.setMinimumWidth(48)
+                btn.setMaximumWidth(48)
 
     def _set_sidebar_width(self, width: int):
         self.sidebar.setMinimumWidth(width)
@@ -685,7 +701,12 @@ class MainWindow(QMainWindow):
         if self.isVisible():
             self.hide()
         else:
-            self.show()
+            if self.isMinimized() or self.isHidden():
+                self.showNormal()
+            else:
+                self.show()
+            if self.centralWidget():
+                self.centralWidget().updateGeometry()
             self.activateWindow()
             self.raise_()
 

@@ -1,7 +1,7 @@
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel,
-    QListWidget, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
+    QListWidget, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -85,10 +85,11 @@ class DropdownSelect(QPushButton):
         super().__init__(parent)
         self.options = options
         self._index = 0
+        self._popup = None
         self.setObjectName("SelectButton")
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setFixedHeight(38)
-        self.setMinimumWidth(250)
+        self.setFixedHeight(40)
+        self.setMinimumWidth(280)
         self.clicked.connect(self._open_menu)
         self._sync_text()
 
@@ -107,11 +108,42 @@ class DropdownSelect(QPushButton):
         self.setText(f"{self.options[self._index]}  ▾")
 
     def _open_menu(self):
-        menu = QMenu(self)
+        if self._popup and self._popup.isVisible():
+            self._popup.close()
+            return
+
+        popup = QWidget(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        popup.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        popup.destroyed.connect(lambda: setattr(self, "_popup", None))
+        popup.setMinimumWidth(self.width())
+        popup.setMaximumWidth(max(self.width(), 320))
+
+        outer = QVBoxLayout(popup)
+        outer.setContentsMargins(0, 0, 0, 0)
+        frame = QFrame()
+        frame.setObjectName("SelectPopup")
+        outer.addWidget(frame)
+
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(3)
         for idx, label in enumerate(self.options):
-            action = menu.addAction(label)
-            action.triggered.connect(lambda _=False, i=idx: self.set_index(i))
-        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
+            item = QPushButton(label)
+            item.setObjectName("SelectMenuItem")
+            item.setProperty("selected", idx == self._index)
+            item.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            item.setFixedHeight(38)
+            item.clicked.connect(lambda _=False, i=idx, p=popup: self._choose(i, p))
+            layout.addWidget(item)
+
+        self._popup = popup
+        popup.move(self.mapToGlobal(self.rect().bottomLeft()))
+        popup.show()
+
+    def _choose(self, index: int, popup: QWidget):
+        self.set_index(index)
+        popup.close()
 
 
 class StrategyWidget(QWidget):
@@ -244,10 +276,10 @@ class StrategyWidget(QWidget):
 
         filter_panel = QFrame()
         filter_panel.setObjectName("GlassPanel")
-        filter_panel.setMinimumHeight(168)
+        filter_panel.setMinimumHeight(212)
         filter_layout = QVBoxLayout(filter_panel)
-        filter_layout.setContentsMargins(16, 14, 16, 16)
-        filter_layout.setSpacing(14)
+        filter_layout.setContentsMargins(16, 16, 16, 18)
+        filter_layout.setSpacing(16)
         filter_title = QLabel("Фильтры")
         filter_title.setObjectName("SectionTitle")
         filter_layout.addWidget(filter_title)
@@ -255,12 +287,12 @@ class StrategyWidget(QWidget):
         self.lbl_game = QLabel("Game Filter: —")
         self.game_select = DropdownSelect(["Выключен", "TCP и UDP", "Только TCP", "Только UDP"])
         self.game_select.changed.connect(self._set_game)
-        filter_layout.addLayout(self._setting_row(self.lbl_game, self.game_select))
+        filter_layout.addWidget(self._setting_row(self.lbl_game, self.game_select))
 
         self.lbl_ipset = QLabel("IPSet: —")
         self.ipset_select = DropdownSelect(["Загруженный список", "Отключить список", "Любой IP"])
         self.ipset_select.changed.connect(self._set_ipset)
-        filter_layout.addLayout(self._setting_row(self.lbl_ipset, self.ipset_select))
+        filter_layout.addWidget(self._setting_row(self.lbl_ipset, self.ipset_select))
 
         self.chk_autoupdate = QCheckBox("Проверять обновления zapret при запуске zapret")
         self.chk_autoupdate.toggled.connect(self._toggle_autoupdate)
@@ -325,9 +357,14 @@ class StrategyWidget(QWidget):
             animation.start()
 
     def _setting_row(self, label: QLabel, control: QWidget):
-        row = QHBoxLayout()
-        row.addWidget(label, 1)
-        row.addWidget(control, 0, Qt.AlignmentFlag.AlignRight)
+        row = QWidget()
+        row.setObjectName("FilterRow")
+        row.setFixedHeight(46)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
+        layout.addWidget(label, 1, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(control, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return row
 
     def _on_mode_change(self, idx: int):

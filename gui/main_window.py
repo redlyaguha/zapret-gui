@@ -9,7 +9,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
-    QGraphicsOpacityEffect, QProgressBar, QStackedWidget, QVBoxLayout, QWidget,
+    QGraphicsOpacityEffect, QProgressBar, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
     QSystemTrayIcon,
 )
 
@@ -210,7 +210,10 @@ class SettingsPage(QWidget):
         app_l.addLayout(row)
 
         behavior = self._panel("Поведение")
+        behavior.setMinimumHeight(168)
         beh_l = behavior.layout()
+        beh_l.setContentsMargins(18, 18, 18, 18)
+        beh_l.setSpacing(7)
         self.chk_no_tray = QCheckBox("Не сворачивать в трей при закрытии окна")
         self.chk_no_tray.setChecked(not self.config.get("stay_open_on_close", True))
         self.chk_no_tray.toggled.connect(self._save_behavior)
@@ -280,13 +283,15 @@ class SettingsPage(QWidget):
 
     def _behavior_row(self, checkbox: QCheckBox) -> QWidget:
         row = QWidget()
+        row.setObjectName("BehaviorRow")
+        row.setFixedHeight(34)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(10)
-        checkbox.setMinimumHeight(30)
-        row_layout.addWidget(checkbox)
+        checkbox.setFixedHeight(30)
+        checkbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        row_layout.addWidget(checkbox, 1, Qt.AlignmentFlag.AlignVCenter)
         row_layout.addStretch()
-        row.setMinimumHeight(32)
         return row
 
     def refresh_banner(self):

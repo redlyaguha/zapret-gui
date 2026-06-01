@@ -204,26 +204,57 @@ def app_stylesheet(theme_name: str) -> str:
         color: {c["accent"]};
     }}
     QPushButton#IconButton {{
-        min-width: 36px;
-        max-width: 36px;
-        min-height: 36px;
-        max-height: 36px;
+        min-width: 48px;
+        max-width: 48px;
+        min-height: 48px;
+        max-height: 48px;
         padding: 0;
-        border-radius: 13px;
+        border-radius: 18px;
         text-align: center;
     }}
     QPushButton#SelectButton {{
-        min-height: 36px;
-        max-height: 38px;
-        min-width: 230px;
-        padding: 5px 14px;
-        border-radius: 16px;
+        min-height: 38px;
+        max-height: 40px;
+        min-width: 270px;
+        padding: 5px 16px;
+        border-radius: 18px;
         text-align: left;
         background: {c["field"]};
+    }}
+    QPushButton#SelectButton:hover {{
+        background: {c["panel_soft"]};
+        border-color: {c["accent"]};
+    }}
+    QPushButton#SelectButton:pressed {{
+        background: {c["field"]};
+        border-color: {c["accent"]};
     }}
     QPushButton#SelectButton::menu-indicator {{
         image: none;
         width: 0;
+    }}
+    QFrame#SelectPopup {{
+        background: {c["panel_solid"]};
+        border: 1px solid {c["border"]};
+        border-radius: 16px;
+    }}
+    QPushButton#SelectMenuItem {{
+        border: 0;
+        background: transparent;
+        border-radius: 11px;
+        padding: 6px 16px;
+        text-align: left;
+        min-height: 30px;
+        max-height: 38px;
+        font-weight: 600;
+    }}
+    QPushButton#SelectMenuItem:hover {{
+        background: {c["accent_soft"]};
+        border: 0;
+    }}
+    QPushButton#SelectMenuItem[selected="true"] {{
+        background: {c["accent_soft"]};
+        color: {c["text"]};
     }}
     QPushButton#CompactButton {{
         min-height: 30px;
@@ -384,13 +415,14 @@ def app_stylesheet(theme_name: str) -> str:
         background: transparent;
     }}
     QCheckBox {{
-        spacing: 9px;
-        min-height: 28px;
+        spacing: 11px;
+        min-height: 30px;
+        padding: 1px 0;
     }}
     QCheckBox::indicator {{
-        width: 18px;
-        height: 18px;
-        border-radius: 5px;
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
         border: 1px solid {c["border"]};
         background: {c["field"]};
     }}

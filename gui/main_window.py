@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
 
 from core.app_info import APP_NAME, APP_VERSION, GITHUB_REPO, get_display_name
 from core.assets import get_asset_path
-from core.diagnostics import run_diagnostics
 from core.service_controller import ServiceController
 from core.zapret_manager import ZapretManager
 from gui.app_update import AppUpdateInfo, check_app_update, open_releases
@@ -163,7 +162,6 @@ class SettingsPage(QWidget):
     theme_changed = Signal(str)
     config_changed = Signal()
     check_updates_requested = Signal()
-    diagnostics_requested = Signal()
     zapret_path_changed = Signal(Path)
 
     def __init__(self, config: dict, zapret_path: Path, parent=None):
@@ -253,14 +251,10 @@ class SettingsPage(QWidget):
         tools = self._panel("Сервис")
         tools_l = tools.layout()
         tools_row = QHBoxLayout()
-        btn_diag = QPushButton("Диагностика")
-        add_press_effect(btn_diag)
-        btn_diag.clicked.connect(self.diagnostics_requested.emit)
         btn_reset = QPushButton("Сбросить настройки")
         btn_reset.setObjectName("DangerButton")
         add_press_effect(btn_reset)
         btn_reset.clicked.connect(self._reset_settings)
-        tools_row.addWidget(btn_diag)
         tools_row.addWidget(btn_reset)
         tools_row.addStretch()
         tools_l.addLayout(tools_row)
@@ -535,7 +529,6 @@ class MainWindow(QMainWindow):
         self.settings_page.theme_changed.connect(self._apply_theme)
         self.settings_page.config_changed.connect(self._on_config_changed)
         self.settings_page.check_updates_requested.connect(self._check_app_updates)
-        self.settings_page.diagnostics_requested.connect(self._run_diagnostics)
         self.settings_page.zapret_path_changed.connect(self._change_zapret_path)
 
         self._build_sidebar()
@@ -723,11 +716,6 @@ class MainWindow(QMainWindow):
         }
         save_config(self.config)
         self.settings_page.refresh_banner()
-
-    def _run_diagnostics(self):
-        results = run_diagnostics(self.zapret_path)
-        lines = [f"{name}: {status}" for name, status in results]
-        QMessageBox.information(self, "Диагностика", "\n".join(lines))
 
     def _change_zapret_path(self, path: Path):
         self.zapret_path = path

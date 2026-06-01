@@ -1,7 +1,6 @@
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
+    QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel,
     QListWidget, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
     QVBoxLayout, QWidget,
 )
@@ -95,6 +94,8 @@ class StrategyWidget(QWidget):
         self._last_error = None
         self._details_visible = False
         self._logs_expanded = False
+        self.game_modes = ["disabled", "all", "tcp", "udp"]
+        self.ipset_modes = ["loaded", "none", "any"]
         self._build_ui()
         self.refresh()
         self._auto_set_mode()
@@ -129,11 +130,6 @@ class StrategyWidget(QWidget):
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box, 1)
-        self.lbl_mode_hint = QLabel("Процесс")
-        self.lbl_mode_hint.setObjectName("Pill")
-        self.lbl_mode_hint.setMinimumWidth(92)
-        self.lbl_mode_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header.addWidget(self.lbl_mode_hint)
         root.addLayout(header)
 
         status_panel = QFrame()
@@ -221,25 +217,16 @@ class StrategyWidget(QWidget):
         filter_layout.addWidget(filter_title)
 
         self.lbl_game = QLabel("Game Filter: —")
-        self.cmb_game = QComboBox()
-        self.cmb_game.setMinimumWidth(230)
-        self.cmb_game.setFixedHeight(36)
-        self.cmb_game.addItem("Выключен", "disabled")
-        self.cmb_game.addItem("TCP и UDP", "all")
-        self.cmb_game.addItem("Только TCP", "tcp")
-        self.cmb_game.addItem("Только UDP", "udp")
-        self.cmb_game.currentIndexChanged.connect(self._set_game)
-        filter_layout.addLayout(self._setting_row(self.lbl_game, self.cmb_game))
+        self.game_switch = SegmentedSwitch(["Выкл", "TCP+UDP", "TCP", "UDP"])
+        self.game_switch.setFixedSize(420, 42)
+        self.game_switch.changed.connect(self._set_game)
+        filter_layout.addLayout(self._setting_row(self.lbl_game, self.game_switch))
 
         self.lbl_ipset = QLabel("IPSet: —")
-        self.cmb_ipset = QComboBox()
-        self.cmb_ipset.setMinimumWidth(230)
-        self.cmb_ipset.setFixedHeight(36)
-        self.cmb_ipset.addItem("Загруженный список", "loaded")
-        self.cmb_ipset.addItem("Отключить список", "none")
-        self.cmb_ipset.addItem("Любой IP", "any")
-        self.cmb_ipset.currentIndexChanged.connect(self._set_ipset)
-        filter_layout.addLayout(self._setting_row(self.lbl_ipset, self.cmb_ipset))
+        self.ipset_switch = SegmentedSwitch(["Список", "Откл", "Любой IP"])
+        self.ipset_switch.setFixedSize(330, 42)
+        self.ipset_switch.changed.connect(self._set_ipset)
+        filter_layout.addLayout(self._setting_row(self.lbl_ipset, self.ipset_switch))
 
         self.chk_autoupdate = QCheckBox("Проверять обновления zapret при запуске zapret")
         self.chk_autoupdate.toggled.connect(self._toggle_autoupdate)
@@ -304,12 +291,11 @@ class StrategyWidget(QWidget):
     def _setting_row(self, label: QLabel, control: QWidget):
         row = QHBoxLayout()
         row.addWidget(label, 1)
-        row.addWidget(control)
+        row.addWidget(control, 0, Qt.AlignmentFlag.AlignRight)
         return row
 
     def _on_mode_change(self, idx: int):
         self.zm.is_service_mode = idx == 1
-        self.lbl_mode_hint.setText("Служба" if self.zm.is_service_mode else "Процесс")
 
     def refresh(self):
         self._state = "idle"
@@ -331,20 +317,30 @@ class StrategyWidget(QWidget):
     def _auto_set_mode(self):
         is_service = self.zm._is_service_running()
         self.zm.is_service_mode = is_service
-        self.lbl_mode_hint.setText("Служба" if is_service else "Процесс")
         self.mode_switch.set_index(1 if is_service else 0, emit=False)
 
     def _refresh_filters(self):
-        self.cmb_game.blockSignals(True)
-        self.cmb_ipset.blockSignals(True)
+        self.game_switch.blockSignals(True)
+        self.ipset_switch.blockSignals(True)
         self.chk_autoupdate.blockSignals(True)
 
-        self.lbl_game.setText(f"Game Filter: {self.sc.game_filter_status()}")
-        self.lbl_ipset.setText(f"IPSet: {self.sc.ipset_filter_status()}")
+        game_status = self.sc.game_filter_status()
+        ipset_status = self.sc.ipset_filter_status()
+        self.lbl_game.setText(f"Game Filter: {game_status}")
+        self.lbl_ipset.setText(f"IPSet: {ipset_status}")
+        game_idx = 0
+        if "TCP and UDP" in game_status:
+            game_idx = 1
+        elif "(TCP)" in game_status:
+            game_idx = 2
+        elif "(UDP)" in game_status:
+            game_idx = 3
+        self.game_switch.set_index(game_idx, emit=False)
+        self.ipset_switch.set_index(self.ipset_modes.index(ipset_status) if ipset_status in self.ipset_modes else 0, emit=False)
         self.chk_autoupdate.setChecked(self.sc.auto_update_status())
 
-        self.cmb_game.blockSignals(False)
-        self.cmb_ipset.blockSignals(False)
+        self.game_switch.blockSignals(False)
+        self.ipset_switch.blockSignals(False)
         self.chk_autoupdate.blockSignals(False)
 
     def _on_select(self, idx: int):
@@ -489,29 +485,18 @@ class StrategyWidget(QWidget):
         if self._state in ("starting", "stopping", "error"):
             current = self._pending_strategy_name or current
 
-        color = None
-        if self._state in ("starting", "stopping"):
-            color = QColor("#58a6ff")
-        elif self._state == "error":
-            color = QColor("#ff6b6b")
-        elif current and current != "__service__" and self.zm.is_running():
-            color = QColor("#53d18a")
-
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
-            if current and current != "__service__" and item.text() == current and color is not None:
-                item.setBackground(color)
-            else:
-                item.setBackground(Qt.GlobalColor.transparent)
+            item.setBackground(Qt.GlobalColor.transparent)
 
-    def _set_game(self):
-        mode = self.cmb_game.currentData()
+    def _set_game(self, idx: int):
+        mode = self.game_modes[idx]
         self.sc.set_game_filter(mode)
         self.lbl_game.setText(f"Game Filter: {self.sc.game_filter_status()}")
         self.log.log(f"Game Filter: {mode}", "system")
 
-    def _set_ipset(self):
-        mode = self.cmb_ipset.currentData()
+    def _set_ipset(self, idx: int):
+        mode = self.ipset_modes[idx]
         try:
             self.sc.set_ipset_filter(mode)
         except Exception as e:

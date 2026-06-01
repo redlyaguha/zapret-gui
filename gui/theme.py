@@ -154,8 +154,10 @@ def app_stylesheet(theme_name: str) -> str:
     }}
     QPushButton:pressed {{
         background: {c["panel_soft"]};
-        padding-top: 6px;
-        padding-bottom: 2px;
+        border-color: {c["border"]};
+    }}
+    QPushButton[pressEffect="true"]:pressed {{
+        background: {c["accent_soft"]};
     }}
     QPushButton:disabled {{
         color: {c["muted"]};
@@ -171,6 +173,9 @@ def app_stylesheet(theme_name: str) -> str:
         border: 0;
         font-size: 15px;
         font-weight: 700;
+    }}
+    QPushButton#PrimaryButton:pressed {{
+        background: {c["accent"]};
     }}
     QPushButton#DangerButton {{
         background: rgba(255, 107, 107, 38);
@@ -233,8 +238,7 @@ def app_stylesheet(theme_name: str) -> str:
         color: white;
     }}
     QPushButton#SegmentFlat:pressed {{
-        padding-top: 4px;
-        padding-bottom: 4px;
+        background: transparent;
     }}
     QComboBox, QTextEdit, QListWidget {{
         background: {c["field"]};
@@ -252,6 +256,15 @@ def app_stylesheet(theme_name: str) -> str:
         border: 0;
         border-radius: 16px;
         background: transparent;
+    }}
+    QScrollArea#LogScroll > QWidget > QWidget {{
+        background: transparent;
+    }}
+    QTextEdit#DetailsText {{
+        border: 0;
+        border-radius: 14px;
+        background: {c["field"]};
+        padding: 10px;
     }}
     QComboBox {{
         min-height: 26px;
@@ -275,13 +288,14 @@ def app_stylesheet(theme_name: str) -> str:
         selection-background-color: {c["accent_soft"]};
     }}
     QListWidget::item {{
-        padding: 9px 12px;
-        margin: 2px;
-        border-radius: 10px;
+        padding: 10px 12px;
+        margin: 3px 4px;
+        border-radius: 11px;
     }}
     QListWidget::item:selected {{
         background: {c["accent_soft"]};
         color: {c["text"]};
+        border: 0;
     }}
     QScrollArea {{
         border: 0;
@@ -326,11 +340,12 @@ def app_stylesheet(theme_name: str) -> str:
     }}
     QCheckBox {{
         spacing: 9px;
+        min-height: 24px;
     }}
     QCheckBox::indicator {{
-        width: 18px;
-        height: 18px;
-        border-radius: 6px;
+        width: 17px;
+        height: 17px;
+        border-radius: 5px;
         border: 1px solid {c["border"]};
         background: {c["field"]};
     }}

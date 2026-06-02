@@ -2,12 +2,12 @@ from PySide6.QtWidgets import QFrame, QWidget, QVBoxLayout, QScrollArea
 from PySide6.QtCore import Signal, QDateTime, Qt
 from typing import Optional
 
-from gui.config import get_logs_dir
+from gui.config import get_dpi_logs_dir
 
 
 class LogFileWriter:
     def __init__(self):
-        self.logs_dir = get_logs_dir()
+        self.logs_dir = get_dpi_logs_dir()
 
     def set_logs_dir(self, logs_dir):
         self.logs_dir = logs_dir
@@ -16,7 +16,7 @@ class LogFileWriter:
     def write(self, timestamp: QDateTime, level: str, message: str):
         try:
             self.logs_dir.mkdir(parents=True, exist_ok=True)
-            path = self.logs_dir / f"zapret-gui-{timestamp.toString('yyyy-MM-dd')}.log"
+            path = self.logs_dir / f"zapret-gui-dpi-{timestamp.toString('yyyy-MM-dd')}.log"
             line = f"[{timestamp.toString('yyyy-MM-dd HH:mm:ss')}] [{level.upper()}] {message}\n"
             with path.open("a", encoding="utf-8") as f:
                 f.write(line)
@@ -79,7 +79,7 @@ class LogWidget(QWidget):
         self.log_received.emit(html, "")
 
     def reload_file_writer(self):
-        self.file_writer.set_logs_dir(get_logs_dir())
+        self.file_writer.set_logs_dir(get_dpi_logs_dir())
 
     def _append_log_line(self, html: str, _):
         from PySide6.QtWidgets import QLabel

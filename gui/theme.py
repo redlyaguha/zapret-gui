@@ -131,7 +131,7 @@ def app_stylesheet(theme_name: str) -> str:
     }}
     QLabel#SettingLabel {{
         font-size: 14px;
-        font-weight: 650;
+        font-weight: 400;
     }}
     QLabel#Muted {{
         color: {c["muted"]};
@@ -232,6 +232,11 @@ def app_stylesheet(theme_name: str) -> str:
     QPushButton#SelectButton:pressed {{
         background: {c["field"]};
         border-color: {c["accent"]};
+    }}
+    QPushButton#SelectButton:disabled {{
+        color: rgba(127, 139, 156, 92);
+        background: rgba(127, 139, 156, 20);
+        border-color: rgba(127, 139, 156, 45);
     }}
     QPushButton#SelectButton::menu-indicator {{
         image: none;

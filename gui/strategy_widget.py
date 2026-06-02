@@ -1,10 +1,18 @@
 import time
+import ctypes
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
-from PySide6.QtCore import QPoint, QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QEasingCurve, QPropertyAnimation, QRect, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QHBoxLayout, QLabel,
-    QListWidget, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
-    QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QScrollArea,
+    QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
+    QGroupBox,
 )
 
 from core.diagnostics import run_diagnostics
@@ -15,6 +23,168 @@ from gui.update_widget import UpdateWorker
 
 POLL_INTERVAL_MS = 1500
 POLL_MAX_ATTEMPTS = 15
+
+
+class TestOptionsDialog(QDialog):
+    def __init__(self, zapret_path: Path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Встроенные тесты zapret")
+        self.zapret_path = zapret_path
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        type_group = QGroupBox("Тип тестов")
+        type_layout = QVBoxLayout(type_group)
+        self.rb_standard = QRadioButton("Стандартные тесты (HTTP/ping)")
+        self.rb_dpi = QRadioButton("DPI checkers (TCP 16-20 freeze)")
+        self.rb_standard.setChecked(True)
+        type_layout.addWidget(self.rb_standard)
+        type_layout.addWidget(self.rb_dpi)
+        layout.addWidget(type_group)
+
+        mode_group = QGroupBox("Конфиги")
+        mode_layout = QVBoxLayout(mode_group)
+        self.rb_all = QRadioButton("Все конфиги")
+        self.rb_selected = QRadioButton("Выбранные конфиги")
+        self.rb_all.setChecked(True)
+        self.rb_all.toggled.connect(self._sync_selection)
+        mode_layout.addWidget(self.rb_all)
+        mode_layout.addWidget(self.rb_selected)
+
+        self.config_list = QListWidget()
+        self.config_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.config_files = self._find_test_configs()
+        for file in self.config_files:
+            self.config_list.addItem(QListWidgetItem(file.name))
+        mode_layout.addWidget(self.config_list)
+        layout.addWidget(mode_group)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Запустить")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Отмена")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self._sync_selection()
+
+    def _find_test_configs(self):
+        def natural_key(path: Path):
+            return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", path.name)]
+
+        return sorted(
+            [p for p in self.zapret_path.glob("*.bat") if not p.name.lower().startswith("service")],
+            key=natural_key,
+        )
+
+    def _sync_selection(self):
+        self.config_list.setEnabled(self.rb_selected.isChecked())
+
+    def options(self):
+        selected_rows = [self.config_list.row(item) + 1 for item in self.config_list.selectedItems()]
+        return {
+            "test_type": "1" if self.rb_standard.isChecked() else "2",
+            "mode": "1" if self.rb_all.isChecked() else "2",
+            "selection": ",".join(str(row) for row in sorted(selected_rows)),
+        }
+
+    def accept(self):
+        if self.rb_selected.isChecked() and not self.config_list.selectedItems():
+            QMessageBox.warning(self, "Встроенные тесты zapret", "Выберите хотя бы один конфиг или режим «Все конфиги».")
+            return
+        super().accept()
+
+
+class TestWorker(QThread):
+    output = Signal(str)
+    finished_signal = Signal(int, str, str)
+
+    def __init__(self, zapret_path: Path, options: dict):
+        super().__init__()
+        self.zapret_path = zapret_path
+        self.options = options
+
+    def run(self):
+        test_ps = self.zapret_path / "utils" / "test zapret.ps1"
+        if not test_ps.exists():
+            self.finished_signal.emit(1, "test zapret.ps1 not found", "")
+            return
+        if not self._find_test_configs():
+            self.finished_signal.emit(1, "Конфиги тестов не найдены в папке zapret", "")
+            return
+
+        temp_script = test_ps.with_name("test zapret.gui.ps1")
+        try:
+            source = test_ps.read_text("utf-8", errors="ignore")
+            source = re.sub(
+                r'(?m)^\s*\[void\]\[System\.Console\]::ReadKey\(\$true\)\s*$',
+                "",
+                source,
+            )
+            temp_script.write_text(source, encoding="utf-8")
+
+            stdin_lines = [self.options["test_type"], self.options["mode"]]
+            if self.options["mode"] == "2":
+                stdin_lines.append(self.options["selection"])
+            stdin_text = "\n".join(stdin_lines) + "\n"
+
+            proc = subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(temp_script)],
+                cwd=self.zapret_path,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            proc.stdin.write(stdin_text)
+            proc.stdin.close()
+
+            recent_output = []
+            for line in proc.stdout:
+                clean = line.rstrip()
+                if clean:
+                    recent_output.append(clean)
+                    recent_output = recent_output[-8:]
+                self.output.emit(clean)
+
+            exit_code = proc.wait()
+            result_file = self._latest_result_file()
+            best = self._read_best_strategy(result_file)
+            detail = best
+            if exit_code != 0 and not result_file:
+                detail = "\n".join(recent_output)
+            self.finished_signal.emit(exit_code, str(result_file) if result_file else "", detail)
+        except Exception as e:
+            self.finished_signal.emit(1, "", str(e))
+        finally:
+            try:
+                temp_script.unlink()
+            except OSError:
+                pass
+
+    def _find_test_configs(self):
+        return [p for p in self.zapret_path.glob("*.bat") if not p.name.lower().startswith("service")]
+
+    def _latest_result_file(self):
+        results_dir = self.zapret_path / "utils" / "test results"
+        if not results_dir.exists():
+            return None
+        files = sorted(results_dir.glob("test_results_*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return files[0] if files else None
+
+    def _read_best_strategy(self, result_file):
+        if not result_file:
+            return ""
+        for line in result_file.read_text("utf-8", errors="ignore").splitlines():
+            if line.lower().startswith("best strategy:"):
+                return line
+        return ""
 
 
 class SegmentedSwitch(QFrame):
@@ -109,6 +279,9 @@ class DropdownSelect(QPushButton):
         if emit:
             self.changed.emit(index)
 
+    def current_index(self) -> int:
+        return self._index
+
     def _sync_text(self):
         self.setText(f"{self.options[self._index]}  ▾")
 
@@ -168,6 +341,7 @@ class DropdownSelect(QPushButton):
 
 class StrategyWidget(QWidget):
     strategy_started = Signal(str, str)
+    status_changed = Signal(str, str, str, str, bool)
 
     def __init__(self, zapret_manager, service_controller, log_widget, parent=None):
         super().__init__(parent)
@@ -185,6 +359,7 @@ class StrategyWidget(QWidget):
         self._details_visible = False
         self._logs_expanded = False
         self._update_worker = None
+        self._test_worker = None
         self.game_modes = ["disabled", "all", "tcp", "udp"]
         self.ipset_modes = ["loaded", "none", "any"]
         self._build_ui()
@@ -334,7 +509,38 @@ class StrategyWidget(QWidget):
         add_press_effect(self.btn_diagnostics)
         self.btn_diagnostics.clicked.connect(self._run_diagnostics)
         filter_layout.addWidget(self._setting_row(QLabel("Запустить диагностику"), self.btn_diagnostics))
+
+        self.btn_clear_discord_cache = QPushButton("Очистить")
+        self.btn_clear_discord_cache.setObjectName("CompactButton")
+        self.btn_clear_discord_cache.setFixedHeight(34)
+        self.btn_clear_discord_cache.setMaximumWidth(130)
+        self.btn_clear_discord_cache.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_clear_discord_cache)
+        self.btn_clear_discord_cache.clicked.connect(self._clear_discord_cache)
+        filter_layout.addWidget(self._setting_row(QLabel("Cache Discord"), self.btn_clear_discord_cache))
         root.addWidget(filter_panel)
+
+        tests_panel = QFrame()
+        tests_panel.setObjectName("GlassPanel")
+        tests_layout = QVBoxLayout(tests_panel)
+        tests_layout.setContentsMargins(16, 16, 16, 18)
+        tests_layout.setSpacing(12)
+        tests_title = QLabel("Встроенные тесты zapret")
+        tests_title.setObjectName("SectionTitle")
+        tests_layout.addWidget(tests_title)
+        tests_row = QHBoxLayout()
+        self.lbl_tests = QLabel("Проверка стратегий через utils/test zapret.ps1.")
+        self.lbl_tests.setObjectName("Muted")
+        self.btn_tests = QPushButton("Запустить тесты")
+        self.btn_tests.setObjectName("CompactButton")
+        self.btn_tests.setFixedHeight(34)
+        self.btn_tests.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add_press_effect(self.btn_tests)
+        self.btn_tests.clicked.connect(self._run_tests)
+        tests_row.addWidget(self.lbl_tests, 1)
+        tests_row.addWidget(self.btn_tests)
+        tests_layout.addLayout(tests_row)
+        root.addWidget(tests_panel)
 
         log_panel = QFrame()
         log_panel.setObjectName("GlassPanel")
@@ -578,14 +784,15 @@ class StrategyWidget(QWidget):
         self.btn_power.setEnabled(not busy)
         self.btn_refresh.setEnabled(not busy)
         self.list_widget.setEnabled(not busy and not running)
+        self.btn_tests.setEnabled(not busy and not (self._test_worker and self._test_worker.isRunning()))
 
         if self._state == "starting":
             name = self._pending_strategy_name or "выбранная стратегия"
-            self._set_status("Запускается", f"Готовим стратегию «{name}».", "#58a6ff", "Запускается")
+            self._set_status("Запускается", f"Готовим стратегию «{name}».", "#58a6ff", "Запускается", True)
         elif self._state == "stopping":
-            self._set_status("Останавливается", "Останавливаем процесс и службы zapret.", "#58a6ff", "Останавливается")
+            self._set_status("Останавливается", "Останавливаем процесс и службы zapret.", "#58a6ff", "Останавливается", True)
         elif self._state == "error":
-            self._set_status("Ошибка", self._last_error or "Операция не выполнена.", "#ff6b6b", "Повторить")
+            self._set_status("Ошибка", self._last_error or "Операция не выполнена.", "#ff6b6b", "Повторить", False)
         elif running:
             current = self.zm.current_strategy
             if current == "__service__":
@@ -594,18 +801,19 @@ class StrategyWidget(QWidget):
                 detail = f"Активная стратегия: {current}"
             else:
                 detail = "zapret работает, но стратегия не определена."
-            self._set_status("Работает", detail, "#53d18a", "Отключить")
+            self._set_status("Работает", detail, "#53d18a", "Отключить", False)
         else:
-            self._set_status("Отключено", "Выберите стратегию и нажмите «Включить».", "#a5adba", "Включить")
+            self._set_status("Отключено", "Выберите стратегию и нажмите «Включить».", "#a5adba", "Включить", False)
 
         self._highlight_current()
         return running
 
-    def _set_status(self, title: str, detail: str, color: str, button: str):
+    def _set_status(self, title: str, detail: str, color: str, button: str, busy: bool):
         self.lbl_status.setText(title)
         self.lbl_status.setStyleSheet(f"color: {color};")
         self.lbl_status_detail.setText(detail)
         self.btn_power.setText(button)
+        self.status_changed.emit(title, detail, color, button, busy)
 
     def _highlight_current(self):
         current = self.zm.current_strategy
@@ -658,3 +866,79 @@ class StrategyWidget(QWidget):
         for line in lines:
             self.log.log(line, "system")
         QMessageBox.information(self, "Диагностика", "\n".join(lines))
+
+    def _clear_discord_cache(self):
+        appdata = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))) / "discord"
+        folders = ["Cache", "Code Cache", "GPUCache"]
+        deleted = []
+        missing = []
+        for folder in folders:
+            target = appdata / folder
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+                deleted.append(folder)
+                self.log.log(f"Удалено: {target}", "ok")
+            else:
+                missing.append(folder)
+        if deleted:
+            QMessageBox.information(self, "Cache Discord", f"Очищено: {', '.join(deleted)}")
+        else:
+            QMessageBox.information(self, "Cache Discord", "Cache-папки Discord не найдены.")
+        if missing:
+            self.log.log(f"Не найдены cache-папки Discord: {', '.join(missing)}", "system")
+
+    def _run_tests(self):
+        if not self._is_admin():
+            box = QMessageBox(self)
+            box.setWindowTitle("Встроенные тесты zapret")
+            box.setText("Тесты требуют прав администратора.\n\nПерезапустить zapret-gui от имени администратора?")
+            btn_yes = box.addButton("Да", QMessageBox.ButtonRole.AcceptRole)
+            btn_no = box.addButton("Нет", QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(btn_yes)
+            box.exec()
+            self.log.log("Для запуска тестов нужны права администратора", "error")
+            if box.clickedButton() == btn_yes:
+                self._restart_as_admin()
+            return
+
+        dlg = TestOptionsDialog(self.zm.zapret_path, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self.btn_tests.setEnabled(False)
+        self.lbl_tests.setText("Тесты выполняются...")
+        self.log.log("Запускаем встроенные тесты zapret...", "system")
+        self._test_worker = TestWorker(self.zm.zapret_path, dlg.options())
+        self._test_worker.output.connect(self._on_test_output)
+        self._test_worker.finished_signal.connect(self._on_tests_done)
+        self._test_worker.start()
+
+    def _on_test_output(self, line: str):
+        if line:
+            self.log.log(line, "info")
+
+    def _on_tests_done(self, exit_code: int, result_file: str, best: str):
+        self.btn_tests.setEnabled(True)
+        msg = f"Тесты завершены с кодом {exit_code}"
+        self.lbl_tests.setText(msg)
+        self.log.log(msg, "ok" if exit_code == 0 else "error")
+        if result_file:
+            self.log.log(f"Результаты тестов: {result_file}", "system")
+        if best:
+            self.log.log(best, "ok" if exit_code == 0 else "warn")
+        if exit_code != 0:
+            QMessageBox.warning(self, "Встроенные тесты zapret", best or msg)
+
+    def _is_admin(self):
+        try:
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            return False
+
+    def _restart_as_admin(self):
+        args = " ".join(f'"{arg}"' for arg in sys.argv)
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, args, None, 1)
+        if result > 32:
+            QApplication.quit()
+        else:
+            self.log.log("Перезапуск от администратора отменен или не удался", "error")

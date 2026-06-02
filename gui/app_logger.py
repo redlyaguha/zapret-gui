@@ -6,18 +6,18 @@ from pathlib import Path
 
 from PySide6.QtCore import qInstallMessageHandler
 
-from gui.config import get_logs_dir
+from gui.config import get_gui_logs_dir
 
 
 class AppLogger:
     def __init__(self):
-        self.logs_dir = get_logs_dir()
+        self.logs_dir = get_gui_logs_dir()
         self._old_excepthook = None
         self._old_threading_hook = None
         self._old_qt_handler = None
 
     def reload(self):
-        self.logs_dir = get_logs_dir()
+        self.logs_dir = get_gui_logs_dir()
 
     def log(self, level: str, source: str, message: str):
         try:

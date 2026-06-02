@@ -8,7 +8,7 @@ from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QThread, QTimer
 from PySide6.QtGui import QIcon, QDesktopServices
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
+    QApplication, QButtonGroup, QCheckBox, QDialog, QFileDialog,
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
     QGraphicsOpacityEffect, QProgressBar, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
     QSystemTrayIcon,
@@ -25,11 +25,11 @@ from gui.app_update import (
 from gui.app_logger import log_app_event, reload_app_logger
 from gui.config import (
     DATA_DIR_NAME, change_data_parent, clear_logs, data_dir_from_parent,
-    format_size, get_data_dir, get_logs_dir, load_config, logs_size_bytes, save_config,
+    format_size, get_data_dir, get_gui_logs_dir, load_config, logs_size_bytes, save_config,
 )
 from gui.effects import add_press_effect
 from gui.log_widget import LogWidget
-from gui.strategy_widget import SegmentedSwitch, StrategyWidget
+from gui.strategy_widget import DropdownSelect, SegmentedSwitch, StrategyWidget
 from gui.theme import apply_app_theme, app_stylesheet
 from gui.tray_manager import TrayManager
 from updater.installer import install_zapret
@@ -271,9 +271,8 @@ class SettingsPage(QWidget):
         self.chk_startup.setChecked(self.config.get("launch_on_startup", False))
         self.chk_startup.toggled.connect(self._save_behavior)
         self.startup_mode_values = ["window", "tray"]
-        self.startup_mode_select = QComboBox()
-        self.startup_mode_select.addItems(["Явно  ▾", "В трее  ▾"])
-        self.startup_mode_select.currentIndexChanged.connect(self._save_behavior)
+        self.startup_mode_select = DropdownSelect(["В окне", "В трее"])
+        self.startup_mode_select.changed.connect(lambda _idx: self._save_behavior())
         self.chk_admin = QCheckBox("Всегда запускать от имени администратора")
         self.chk_admin.setChecked(self.config.get("always_run_as_admin", False))
         self.chk_admin.toggled.connect(self._save_behavior)
@@ -428,7 +427,7 @@ class SettingsPage(QWidget):
         self.chk_admin.setChecked(self.config.get("always_run_as_admin", False))
         startup_mode = self.config.get("startup_mode", "window")
         idx = self.startup_mode_values.index(startup_mode) if startup_mode in self.startup_mode_values else 0
-        self.startup_mode_select.setCurrentIndex(idx)
+        self.startup_mode_select.set_index(idx, emit=False)
         self.startup_mode_select.setEnabled(self.chk_startup.isChecked())
         for control in controls:
             control.blockSignals(False)
@@ -506,7 +505,7 @@ class SettingsPage(QWidget):
         )
         self.config["stay_open_on_close"] = not self.chk_no_tray.isChecked()
         self.config["launch_on_startup"] = self.chk_startup.isChecked()
-        self.config["startup_mode"] = self.startup_mode_values[self.startup_mode_select.currentIndex()]
+        self.config["startup_mode"] = self.startup_mode_values[self.startup_mode_select.current_index()]
         self.config["always_run_as_admin"] = self.chk_admin.isChecked()
         self.startup_mode_select.setEnabled(self.chk_startup.isChecked())
         self._set_startup(
@@ -766,6 +765,24 @@ class AboutPage(QWidget):
             grid.addWidget(QLabel(value), row, 1)
         layout.addWidget(panel)
 
+        licenses = QFrame()
+        licenses.setObjectName("GlassPanel")
+        licenses_layout = QVBoxLayout(licenses)
+        licenses_layout.setContentsMargins(18, 16, 18, 16)
+        licenses_layout.setSpacing(8)
+        licenses_title = QLabel("Сторонние компоненты")
+        licenses_title.setObjectName("SectionTitle")
+        licenses_text = QLabel(
+            "Flowseal/zapret-discord-youtube - MIT, Copyright (c) 2024-2026 Flowseal\n"
+            "bol-van/zapret - MIT, Copyright (c) 2016-2026 bol-van\n"
+            "WinDivert - LGPLv3 или GPLv2 на выбор: https://github.com/basil00/WinDivert"
+        )
+        licenses_text.setWordWrap(True)
+        licenses_text.setObjectName("Muted")
+        licenses_layout.addWidget(licenses_title)
+        licenses_layout.addWidget(licenses_text)
+        layout.addWidget(licenses)
+
         actions = QHBoxLayout()
         btn_github = QPushButton("GitHub")
         add_press_effect(btn_github)
@@ -871,6 +888,7 @@ class MainWindow(QMainWindow):
         self.settings_page = SettingsPage(self.config, self.zapret_path)
         self.about_page = AboutPage(self.zm)
         self.strategy_widget.strategy_started.connect(self._remember_strategy)
+        self.strategy_widget.status_changed.connect(self._on_strategy_status_changed)
 
         self.stack.addWidget(self.strategy_widget)
         self.stack.addWidget(self.telegram_page)
@@ -1064,7 +1082,11 @@ class MainWindow(QMainWindow):
 
     def _update_tray_status(self):
         if hasattr(self, "zm"):
-            self.tray.set_status(self.zm.is_running())
+            self.strategy_widget._update_status(auto_detect=True)
+
+    def _on_strategy_status_changed(self, title: str, detail: str, color: str, button: str, busy: bool):
+        if hasattr(self, "tray"):
+            self.tray.set_state(title, detail, color, button, busy)
 
     def _remember_strategy(self, strategy_name: str, mode: str):
         self.config["last_strategy"] = strategy_name
@@ -1176,7 +1198,7 @@ class MainWindow(QMainWindow):
             log_app_event("error", "app-update", f"Update install failed: {error}")
             return
         try:
-            launch_update_helper(Path(new_exe), get_logs_dir())
+            launch_update_helper(Path(new_exe), get_gui_logs_dir())
         except Exception as e:
             self.settings_page.set_update_progress(False)
             self.settings_page.lbl_update_status.setText(f"Не удалось запустить установщик: {e}")

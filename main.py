@@ -16,7 +16,7 @@ from core.app_info import APP_NAME, get_display_name
 from core.assets import get_asset_path
 from gui.config import (
     configure_data_dir, data_dir_from_parent, default_parent_dir,
-    get_data_dir, has_configured_data_dir, load_config, save_config,
+    ensure_log_dirs, get_data_dir, has_configured_data_dir, load_config, save_config,
 )
 from gui.app_logger import install_app_logger, log_app_event
 from gui.effects import add_press_effect
@@ -97,6 +97,7 @@ def main():
             sys.exit(0)
         configure_data_dir(data_dir_dialog.get_data_dir(), migrate_legacy=True)
 
+    ensure_log_dirs()
     install_app_logger()
     log_app_event("info", "startup", "Application startup")
     app.aboutToQuit.connect(lambda: log_app_event("info", "shutdown", "Application shutdown"))

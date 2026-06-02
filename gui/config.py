@@ -11,6 +11,9 @@ from core.app_info import APP_NAME
 DATA_DIR_NAME = "zapret-gui-config"
 CONFIG_FILE_NAME = "config.json"
 LOG_DIR_NAME = "logs"
+LOG_DPI_DIR_NAME = "dpi"
+LOG_TELEGRAM_DIR_NAME = "telegram"
+LOG_GUI_DIR_NAME = "gui"
 
 DEFAULT_CONFIG = {
     "zapret_path": "",
@@ -71,6 +74,23 @@ def get_logs_dir() -> Path:
     return get_data_dir() / LOG_DIR_NAME
 
 
+def get_dpi_logs_dir() -> Path:
+    return get_logs_dir() / LOG_DPI_DIR_NAME
+
+
+def get_telegram_logs_dir() -> Path:
+    return get_logs_dir() / LOG_TELEGRAM_DIR_NAME
+
+
+def get_gui_logs_dir() -> Path:
+    return get_logs_dir() / LOG_GUI_DIR_NAME
+
+
+def ensure_log_dirs():
+    for path in (get_dpi_logs_dir(), get_telegram_logs_dir(), get_gui_logs_dir()):
+        path.mkdir(parents=True, exist_ok=True)
+
+
 def get_config_file() -> Path:
     return get_data_dir() / CONFIG_FILE_NAME
 
@@ -114,6 +134,7 @@ def configure_data_dir(data_dir: Path, migrate_legacy: bool = True):
             shutil.rmtree(old_logs, ignore_errors=True)
 
     _settings().setValue("data_dir", str(data_dir))
+    ensure_log_dirs()
 
 
 def change_data_parent(parent: Path):
@@ -123,6 +144,7 @@ def change_data_parent(parent: Path):
         new_dir.mkdir(parents=True, exist_ok=True)
         (new_dir / LOG_DIR_NAME).mkdir(parents=True, exist_ok=True)
         _settings().setValue("data_dir", str(new_dir))
+        ensure_log_dirs()
         return new_dir
 
     new_dir.mkdir(parents=True, exist_ok=True)
@@ -130,6 +152,7 @@ def change_data_parent(parent: Path):
     _copy_tree_contents(old_dir / LOG_DIR_NAME, new_dir / LOG_DIR_NAME)
     (new_dir / LOG_DIR_NAME).mkdir(parents=True, exist_ok=True)
     _settings().setValue("data_dir", str(new_dir))
+    ensure_log_dirs()
 
     if old_dir.name == DATA_DIR_NAME and old_dir.exists():
         shutil.rmtree(old_dir, ignore_errors=True)
@@ -157,7 +180,7 @@ def clear_logs():
     logs_dir = get_logs_dir()
     if logs_dir.exists():
         shutil.rmtree(logs_dir, ignore_errors=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    ensure_log_dirs()
 
 
 def load_config() -> dict:

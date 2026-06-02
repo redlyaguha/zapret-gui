@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QSystemTrayIcon, QMenu
+from PySide6.QtWidgets import QLabel, QSystemTrayIcon, QMenu, QWidgetAction
 from PySide6.QtGui import QIcon, QAction
 from PySide6.QtCore import Signal, QObject
 
@@ -45,8 +45,10 @@ class TrayManager(QObject):
         """)
         self.action_show = QAction("Показать / скрыть", parent)
         self.action_show.triggered.connect(lambda _checked=False: self.show_window.emit())
-        self.action_status = QAction("Статус: отключено", parent)
-        self.action_status.setEnabled(False)
+        self.status_label = QLabel("Статус: Отключено")
+        self.status_label.setStyleSheet("padding: 8px 12px; color: #a5adba;")
+        self.action_status = QWidgetAction(parent)
+        self.action_status.setDefaultWidget(self.status_label)
         self.action_power = QAction("Запустить последнюю стратегию", parent)
         self.action_power.triggered.connect(lambda _checked=False: self.toggle_strategy.emit())
         self.action_quit = QAction("Выход", parent)
@@ -73,9 +75,18 @@ class TrayManager(QObject):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_window.emit()
 
+    def set_state(self, title: str, detail: str, color: str, power_text: str, busy: bool = False):
+        self.status_label.setText(f"Статус: {title}")
+        self.status_label.setStyleSheet(f"padding: 8px 12px; color: {color};")
+        if title == "Отключено":
+            self.action_power.setText("Запустить последнюю стратегию")
+        else:
+            self.action_power.setText(power_text)
+        self.action_power.setEnabled(not busy)
+        self.tray.setToolTip(f"{get_display_name()} - {title}")
+
     def set_status(self, running: bool):
-        status = "работает" if running else "отключено"
-        self.action_status.setText(f"Статус: {status}")
-        self.action_power.setText("Отключить" if running else "Запустить последнюю стратегию")
-        self.action_power.setEnabled(True)
-        self.tray.setToolTip(f"{get_display_name()} - {status}")
+        if running:
+            self.set_state("Работает", "", "#53d18a", "Отключить")
+        else:
+            self.set_state("Отключено", "", "#a5adba", "Запустить последнюю стратегию")

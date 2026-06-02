@@ -586,6 +586,7 @@ class SettingsPage(QWidget):
             "launch_on_startup": False,
             "deferred_app_update": None,
             "last_strategy": self.config.get("last_strategy", ""),
+            "last_strategy_mode": self.config.get("last_strategy_mode", "process"),
             "app_auto_update_enabled": True,
             "app_update_include_prerelease": False,
             "last_app_update_check": "",
@@ -921,8 +922,7 @@ class MainWindow(QMainWindow):
     def _setup_tray(self):
         self.tray = TrayManager(self)
         self.tray.show_window.connect(self._toggle_visible)
-        self.tray.start_last_strategy.connect(self._start_last_strategy_from_tray)
-        self.tray.stop_strategy.connect(self._stop_strategy_from_tray)
+        self.tray.toggle_strategy.connect(self._toggle_strategy_from_tray)
         self.tray.quit_app.connect(self._quit)
         self.tray.show()
         self._update_tray_status()
@@ -944,21 +944,35 @@ class MainWindow(QMainWindow):
         if hasattr(self, "zm"):
             self.tray.set_status(self.zm.is_running())
 
-    def _remember_strategy(self, strategy_name: str):
+    def _remember_strategy(self, strategy_name: str, mode: str):
         self.config["last_strategy"] = strategy_name
+        self.config["last_strategy_mode"] = "service" if mode == "service" else "process"
         save_config(self.config)
 
-    def _start_last_strategy_from_tray(self):
+    def _toggle_strategy_from_tray(self):
+        if self.zm.is_running():
+            self.strategy_widget.stop_current_strategy()
+            self._update_tray_status()
+            return
+
         strategy_name = self.config.get("last_strategy", "")
-        if self.strategy_widget.start_last_strategy(strategy_name):
+        mode = self.config.get("last_strategy_mode", "process")
+        if self.strategy_widget.start_last_strategy(strategy_name, mode):
             self._switch_page("dpi")
         else:
-            self._toggle_visible()
+            self._switch_page("dpi")
+            self._show_window()
         self._update_tray_status()
 
-    def _stop_strategy_from_tray(self):
-        self.strategy_widget.stop_current_strategy()
-        self._update_tray_status()
+    def _show_window(self):
+        if self.isMinimized() or self.isHidden():
+            self.showNormal()
+        else:
+            self.show()
+        if self.centralWidget():
+            self.centralWidget().updateGeometry()
+        self.activateWindow()
+        self.raise_()
 
     def maybe_check_app_updates(self):
         if not self.config.get("app_auto_update_enabled", True):

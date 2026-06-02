@@ -8,8 +8,7 @@ from core.assets import get_asset_path
 
 class TrayManager(QObject):
     show_window = Signal()
-    start_last_strategy = Signal()
-    stop_strategy = Signal()
+    toggle_strategy = Signal()
     quit_app = Signal()
 
     def __init__(self, parent):
@@ -48,17 +47,14 @@ class TrayManager(QObject):
         self.action_show.triggered.connect(lambda _checked=False: self.show_window.emit())
         self.action_status = QAction("Статус: отключено", parent)
         self.action_status.setEnabled(False)
-        self.action_start_last = QAction("Включить последнюю стратегию", parent)
-        self.action_start_last.triggered.connect(lambda _checked=False: self.start_last_strategy.emit())
-        self.action_stop = QAction("Отключить", parent)
-        self.action_stop.triggered.connect(lambda _checked=False: self.stop_strategy.emit())
+        self.action_power = QAction("Запустить последнюю стратегию", parent)
+        self.action_power.triggered.connect(lambda _checked=False: self.toggle_strategy.emit())
         self.action_quit = QAction("Выход", parent)
         self.action_quit.triggered.connect(lambda _checked=False: self.quit_app.emit())
 
         self.menu.addAction(self.action_status)
         self.menu.addSeparator()
-        self.menu.addAction(self.action_start_last)
-        self.menu.addAction(self.action_stop)
+        self.menu.addAction(self.action_power)
         self.menu.addSeparator()
         self.menu.addAction(self.action_show)
         self.menu.addSeparator()
@@ -80,6 +76,6 @@ class TrayManager(QObject):
     def set_status(self, running: bool):
         status = "работает" if running else "отключено"
         self.action_status.setText(f"Статус: {status}")
-        self.action_start_last.setEnabled(not running)
-        self.action_stop.setEnabled(running)
+        self.action_power.setText("Отключить" if running else "Запустить последнюю стратегию")
+        self.action_power.setEnabled(True)
         self.tray.setToolTip(f"{get_display_name()} - {status}")

@@ -419,12 +419,25 @@ def app_stylesheet(theme_name: str) -> str:
         min-height: 30px;
         padding: 1px 0;
     }}
+    QCheckBox:checked {{
+        color: {c["text"]};
+    }}
+    QCheckBox:unchecked {{
+        color: {c["muted"]};
+    }}
+    QCheckBox:disabled {{
+        color: rgba(127, 139, 156, 100);
+    }}
     QCheckBox::indicator {{
         width: 20px;
         height: 20px;
         border-radius: 6px;
         border: 1px solid {c["border"]};
         background: {c["field"]};
+    }}
+    QCheckBox::indicator:disabled {{
+        border-color: rgba(127, 139, 156, 55);
+        background: rgba(127, 139, 156, 22);
     }}
     QCheckBox::indicator:hover {{
         border-color: {c["accent"]};

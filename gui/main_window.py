@@ -267,8 +267,16 @@ class SettingsPage(QWidget):
         self.chk_startup = QCheckBox("Запускать вместе с Windows")
         self.chk_startup.setChecked(self.config.get("launch_on_startup", False))
         self.chk_startup.toggled.connect(self._save_behavior)
+        self.startup_mode_values = ["window", "tray"]
+        self.startup_mode_select = QComboBox()
+        self.startup_mode_select.addItems(["Явно", "В трее"])
+        self.startup_mode_select.currentIndexChanged.connect(self._save_behavior)
+        self.chk_admin = QCheckBox("Всегда запускать от имени администратора")
+        self.chk_admin.setChecked(self.config.get("always_run_as_admin", False))
+        self.chk_admin.toggled.connect(self._save_behavior)
         beh_l.addWidget(self._behavior_row(self.chk_no_tray))
-        beh_l.addWidget(self._behavior_row(self.chk_startup))
+        beh_l.addWidget(self._behavior_row(self.chk_startup, self.startup_mode_select))
+        beh_l.addWidget(self._behavior_row(self.chk_admin))
         self._sync_behavior_controls()
 
         updates = self._panel("Обновления zapret-gui")
@@ -381,7 +389,7 @@ class SettingsPage(QWidget):
         layout.addWidget(heading)
         return panel
 
-    def _behavior_row(self, checkbox: QCheckBox) -> QWidget:
+    def _behavior_row(self, checkbox: QCheckBox, trailing: QWidget | None = None) -> QWidget:
         row = QWidget()
         row.setObjectName("BehaviorRow")
         row.setFixedHeight(34)
@@ -391,6 +399,8 @@ class SettingsPage(QWidget):
         checkbox.setFixedHeight(30)
         checkbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         row_layout.addWidget(checkbox, 1, Qt.AlignmentFlag.AlignVCenter)
+        if trailing:
+            row_layout.addWidget(trailing, 0, Qt.AlignmentFlag.AlignVCenter)
         row_layout.addStretch()
         return row
 
@@ -405,11 +415,18 @@ class SettingsPage(QWidget):
         controls = (
             self.chk_no_tray,
             self.chk_startup,
+            self.chk_admin,
+            self.startup_mode_select,
         )
         for control in controls:
             control.blockSignals(True)
         self.chk_no_tray.setChecked(not self.config.get("stay_open_on_close", True))
         self.chk_startup.setChecked(self.config.get("launch_on_startup", False))
+        self.chk_admin.setChecked(self.config.get("always_run_as_admin", False))
+        startup_mode = self.config.get("startup_mode", "window")
+        idx = self.startup_mode_values.index(startup_mode) if startup_mode in self.startup_mode_values else 0
+        self.startup_mode_select.setCurrentIndex(idx)
+        self.startup_mode_select.setEnabled(self.chk_startup.isChecked())
         for control in controls:
             control.blockSignals(False)
 
@@ -480,13 +497,50 @@ class SettingsPage(QWidget):
         self.theme_changed.emit(theme)
 
     def _save_behavior(self):
+        previous_admin_startup = (
+            self.config.get("launch_on_startup", False)
+            and self.config.get("always_run_as_admin", False)
+        )
         self.config["stay_open_on_close"] = not self.chk_no_tray.isChecked()
         self.config["launch_on_startup"] = self.chk_startup.isChecked()
-        self._set_startup(self.chk_startup.isChecked())
+        self.config["startup_mode"] = self.startup_mode_values[self.startup_mode_select.currentIndex()]
+        self.config["always_run_as_admin"] = self.chk_admin.isChecked()
+        self.startup_mode_select.setEnabled(self.chk_startup.isChecked())
+        self._set_startup(
+            self.chk_startup.isChecked(),
+            self.config["startup_mode"],
+            self.chk_admin.isChecked(),
+            previous_admin_startup,
+        )
         save_config(self.config)
         self.config_changed.emit()
 
-    def _set_startup(self, enabled: bool):
+    def _startup_command(self, mode: str) -> str:
+        args = ["--startup-tray"] if mode == "tray" else []
+        if getattr(sys, "frozen", False):
+            command = f'"{sys.executable}"'
+        else:
+            script = Path(sys.argv[0]).resolve()
+            command = f'"{sys.executable}" "{script}"'
+        if args:
+            command += " " + " ".join(args)
+        return command
+
+    def _set_startup(self, enabled: bool, mode: str, run_as_admin: bool, cleanup_elevated: bool = False):
+        try:
+            self._delete_startup_registry()
+            self._run_schtasks_delete(elevated=cleanup_elevated and not run_as_admin)
+            if not enabled:
+                return
+            command = self._startup_command(mode)
+            if run_as_admin:
+                self._run_schtasks_create(command)
+            else:
+                self._write_startup_registry(command)
+        except Exception as e:
+            QMessageBox.warning(self, "Автозапуск", f"Не удалось изменить автозапуск: {e}")
+
+    def _delete_startup_registry(self):
         try:
             import winreg
             key = winreg.OpenKey(
@@ -495,21 +549,68 @@ class SettingsPage(QWidget):
                 0,
                 winreg.KEY_SET_VALUE,
             )
-            if enabled:
-                if getattr(sys, "frozen", False):
-                    command = f'"{sys.executable}"'
-                else:
-                    script = Path(sys.argv[0]).resolve()
-                    command = f'"{sys.executable}" "{script}"'
-                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
-            else:
-                try:
-                    winreg.DeleteValue(key, APP_NAME)
-                except FileNotFoundError:
-                    pass
+            try:
+                winreg.DeleteValue(key, APP_NAME)
+            except FileNotFoundError:
+                pass
             winreg.CloseKey(key)
-        except Exception as e:
-            QMessageBox.warning(self, "Автозапуск", f"Не удалось изменить автозапуск: {e}")
+        except Exception:
+            pass
+
+    def _write_startup_registry(self, command: str):
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0,
+            winreg.KEY_SET_VALUE,
+        )
+        winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
+        winreg.CloseKey(key)
+
+    def _run_schtasks_delete(self, elevated: bool):
+        command = f'schtasks /Delete /TN "{APP_NAME}" /F'
+        if elevated:
+            self._run_elevated_cmd(f'{command} >nul 2>&1 & exit /b 0')
+            return
+        try:
+            import subprocess
+            subprocess.run(
+                ["schtasks", "/Delete", "/TN", APP_NAME, "/F"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception:
+            pass
+
+    def _run_schtasks_create(self, command: str):
+        quoted_command = command.replace('"', r'\"')
+        create = (
+            f'schtasks /Create /TN "{APP_NAME}" /SC ONLOGON '
+            f'/TR "{quoted_command}" /RL HIGHEST /F'
+        )
+        self._run_elevated_cmd(f'schtasks /Delete /TN "{APP_NAME}" /F >nul 2>&1 & {create}')
+
+    def _run_elevated_cmd(self, command: str):
+        import subprocess
+        ps_command = (
+            "$p = Start-Process -FilePath cmd.exe "
+            f"-ArgumentList @('/c', {self._ps_quote(command)}) "
+            "-Verb RunAs -Wait -PassThru; exit $p.ExitCode"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_command],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "UAC был отменён или schtasks завершился с ошибкой").strip()
+            raise RuntimeError(details)
+
+    def _ps_quote(self, value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
 
     def _change_path(self):
         folder = QFileDialog.getExistingDirectory(self, "Выберите папку zapret с service.bat", str(self.zapret_path))
@@ -584,6 +685,8 @@ class SettingsPage(QWidget):
             "theme": "system",
             "stay_open_on_close": True,
             "launch_on_startup": False,
+            "startup_mode": "window",
+            "always_run_as_admin": False,
             "deferred_app_update": None,
             "last_strategy": self.config.get("last_strategy", ""),
             "last_strategy_mode": self.config.get("last_strategy_mode", "process"),
@@ -644,6 +747,7 @@ class AboutPage(QWidget):
             ("zapret-gui", APP_VERSION),
             ("zapret", self.zm.get_local_version()),
             ("Репозиторий", GITHUB_REPO),
+            ("Telegram", "https://t.me/lyaguha_logs"),
             ("Сборка", "Portable Windows / исходники Python"),
         ]
         for row, (name, value) in enumerate(rows):
@@ -660,12 +764,20 @@ class AboutPage(QWidget):
         btn_releases = QPushButton("Releases")
         add_press_effect(btn_releases)
         btn_releases.clicked.connect(open_releases)
+        btn_telegram = QPushButton("Telegram")
+        add_press_effect(btn_telegram)
+        btn_telegram.clicked.connect(lambda: webbrowser.open("https://t.me/lyaguha_logs"))
         btn_zapret = QPushButton("Открыть папку zapret")
         add_press_effect(btn_zapret)
         btn_zapret.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.zm.zapret_path))))
+        btn_config = QPushButton("Открыть папку конфигов")
+        add_press_effect(btn_config)
+        btn_config.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_data_dir()))))
         actions.addWidget(btn_github)
         actions.addWidget(btn_releases)
+        actions.addWidget(btn_telegram)
         actions.addWidget(btn_zapret)
+        actions.addWidget(btn_config)
         actions.addStretch()
         layout.addLayout(actions)
         layout.addStretch()

@@ -17,6 +17,8 @@ DEFAULT_CONFIG = {
     "theme": "system",
     "stay_open_on_close": True,
     "launch_on_startup": False,
+    "startup_mode": "window",
+    "always_run_as_admin": False,
     "deferred_app_update": None,
     "last_strategy": "",
     "last_strategy_mode": "process",

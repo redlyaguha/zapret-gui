@@ -1,5 +1,6 @@
 import sys
 import os
+import ctypes
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -8,7 +9,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton,
-    QVBoxLayout,
+    QMessageBox, QVBoxLayout,
 )
 
 from core.app_info import APP_NAME, get_display_name
@@ -84,6 +85,7 @@ def main():
     app.setOrganizationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(QIcon(str(get_asset_path("assets/app_icon.ico"))))
+    startup_tray = "--startup-tray" in sys.argv
 
     apply_app_theme(app, "system")
     app.setStyleSheet(app_stylesheet("system"))
@@ -100,9 +102,46 @@ def main():
     app.setStyleSheet(app_stylesheet(config.get("theme", "system")))
 
     window = MainWindow()
-    window.show()
+    if not startup_tray:
+        window.show()
+    QTimer.singleShot(250, lambda: maybe_prompt_admin_restart(window))
     QTimer.singleShot(500, window.maybe_check_app_updates)
     sys.exit(app.exec())
+
+
+def is_admin() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def maybe_prompt_admin_restart(window: MainWindow):
+    if is_admin():
+        return
+    reply = QMessageBox.question(
+        window,
+        "Права администратора",
+        "Приложение запущено без прав администратора.\n\nПерезапустить от имени администратора?",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    if reply != QMessageBox.StandardButton.Yes:
+        return
+    if restart_as_admin():
+        QApplication.quit()
+
+
+def restart_as_admin() -> bool:
+    if getattr(sys, "frozen", False):
+        executable = sys.executable
+        params = " ".join(f'"{arg}"' for arg in sys.argv[1:])
+    else:
+        executable = sys.executable
+        script = Path(sys.argv[0]).resolve()
+        params = " ".join([f'"{script}"'] + [f'"{arg}"' for arg in sys.argv[1:]])
+    result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, params, None, 1)
+    return result > 32
 
 
 if __name__ == "__main__":

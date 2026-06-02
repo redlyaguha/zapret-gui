@@ -18,6 +18,7 @@ from gui.config import (
     configure_data_dir, data_dir_from_parent, default_parent_dir,
     get_data_dir, has_configured_data_dir, load_config, save_config,
 )
+from gui.app_logger import install_app_logger, log_app_event
 from gui.effects import add_press_effect
 from gui.main_window import MainWindow
 from gui.theme import apply_app_theme, app_stylesheet
@@ -96,6 +97,10 @@ def main():
             sys.exit(0)
         configure_data_dir(data_dir_dialog.get_data_dir(), migrate_legacy=True)
 
+    install_app_logger()
+    log_app_event("info", "startup", "Application startup")
+    app.aboutToQuit.connect(lambda: log_app_event("info", "shutdown", "Application shutdown"))
+
     config = load_config()
     save_config(config)
     apply_app_theme(app, config.get("theme", "system"))
@@ -118,18 +123,23 @@ def is_admin() -> bool:
 
 def maybe_prompt_admin_restart(window: MainWindow):
     if is_admin():
+        log_app_event("info", "admin", "Application is running as administrator")
         return
-    reply = QMessageBox.question(
-        window,
-        "Права администратора",
-        "Приложение запущено без прав администратора.\n\nПерезапустить от имени администратора?",
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.No,
-    )
-    if reply != QMessageBox.StandardButton.Yes:
+    box = QMessageBox(window)
+    box.setWindowTitle("Права администратора")
+    box.setText("Приложение запущено без прав администратора.\n\nПерезапустить от имени администратора?")
+    btn_yes = box.addButton("Да", QMessageBox.ButtonRole.AcceptRole)
+    btn_no = box.addButton("Нет", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(btn_no)
+    box.exec()
+    if box.clickedButton() != btn_yes:
+        log_app_event("info", "admin", "Administrator restart declined")
         return
     if restart_as_admin():
+        log_app_event("info", "admin", "Elevated restart launched")
         QApplication.quit()
+    else:
+        log_app_event("error", "admin", "Elevated restart failed or was cancelled")
 
 
 def restart_as_admin() -> bool:
@@ -140,8 +150,12 @@ def restart_as_admin() -> bool:
         executable = sys.executable
         script = Path(sys.argv[0]).resolve()
         params = " ".join([f'"{script}"'] + [f'"{arg}"' for arg in sys.argv[1:]])
-    result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, params, None, 1)
-    return result > 32
+    try:
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, params, None, 1)
+        return result > 32
+    except Exception as e:
+        log_app_event("error", "admin", f"ShellExecuteW failed: {e}")
+        return False
 
 
 if __name__ == "__main__":

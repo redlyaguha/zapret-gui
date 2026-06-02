@@ -5,7 +5,8 @@ import re
 def check_bfe():
     result = subprocess.run(
         ["sc", "query", "BFE"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     return "RUNNING" in result.stdout
 
@@ -31,7 +32,8 @@ def check_proxy():
 def check_tcp_timestamps():
     result = subprocess.run(
         ["netsh", "interface", "tcp", "show", "global"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     return "timestamps" in result.stdout and "enabled" in result.stdout
 
@@ -39,7 +41,8 @@ def check_tcp_timestamps():
 def check_adguard():
     result = subprocess.run(
         ["tasklist", "/FI", "IMAGENAME eq AdguardSvc.exe"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     return "AdguardSvc.exe" in result.stdout
 
@@ -47,7 +50,8 @@ def check_adguard():
 def check_killer():
     result = subprocess.run(
         ["sc", "query"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     return bool(re.search(r"Killer", result.stdout, re.I))
 
@@ -55,7 +59,8 @@ def check_killer():
 def check_intel_connectivity():
     result = subprocess.run(
         ["sc", "query"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     return bool(re.search(r"Intel.*Connectivity.*Network", result.stdout, re.I))
 
@@ -63,7 +68,8 @@ def check_intel_connectivity():
 def check_checkpoint():
     result = subprocess.run(
         ["sc", "query"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     return ("TracSrvWrapper" in result.stdout) or ("EPWD" in result.stdout)
 
@@ -71,7 +77,8 @@ def check_checkpoint():
 def check_smartbyte():
     result = subprocess.run(
         ["sc", "query"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     return "SmartByte" in result.stdout
 
@@ -84,7 +91,8 @@ def check_windivert_file(zapret_path):
 def check_vpn():
     result = subprocess.run(
         ["sc", "query"],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     services = re.findall(r"SERVICE_NAME:\s+(\S+)", result.stdout)
     vpn_services = [s for s in services if "vpn" in s.lower()]
@@ -98,7 +106,8 @@ def check_doh():
             "Get-ChildItem -Recurse -Path 'HKLM:System\\CurrentControlSet\\Services\\Dnscache\\InterfaceSpecificParameters\\' "
             "| Get-ItemProperty | Where-Object { $_.DohFlags -gt 0 } | Measure-Object | Select-Object -ExpandProperty Count"
         ],
-        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     try:
         return int(result.stdout.strip()) > 0

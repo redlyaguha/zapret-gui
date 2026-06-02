@@ -12,7 +12,8 @@ class ServiceController:
     def service_status(self, name="zapret"):
         result = subprocess.run(
             ["sc", "query", name],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         for line in result.stdout.splitlines():
             if "STATE" in line:
@@ -36,7 +37,7 @@ class ServiceController:
 
         result = subprocess.run(
             [str(svc), "admin"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
             cwd=self.zapret_path, creationflags=subprocess.CREATE_NO_WINDOW
         )
         return True, "Service installation launched"
@@ -131,7 +132,8 @@ class ServiceController:
                 r"HKLM\System\CurrentControlSet\Services\zapret",
                 "/v", "zapret-discord-youtube"
             ],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         for line in result.stdout.splitlines():
             parts = line.strip().split()
@@ -212,7 +214,8 @@ Write-Output 'Hosts file updated successfully.'
                 "powershell", "-NoProfile", "-Command",
                 f'$p = Start-Process -FilePath cmd.exe -ArgumentList @("/c", {self._ps_quote(command)}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode'
             ],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         details = ""
         if log_file.exists():

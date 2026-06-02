@@ -22,6 +22,7 @@ from gui.app_update import (
     AppUpdateInfo, check_app_update, download_and_verify_update, extract_app_exe,
     launch_update_helper, open_releases,
 )
+from gui.app_logger import log_app_event, reload_app_logger
 from gui.config import (
     DATA_DIR_NAME, change_data_parent, clear_logs, data_dir_from_parent,
     format_size, get_data_dir, get_logs_dir, load_config, logs_size_bytes, save_config,
@@ -246,7 +247,9 @@ class SettingsPage(QWidget):
         row = QHBoxLayout(theme_row)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(14)
-        row.addWidget(QLabel("Тема"), 1, Qt.AlignmentFlag.AlignVCenter)
+        theme_label = QLabel("Тема")
+        theme_label.setObjectName("SettingLabel")
+        row.addWidget(theme_label, 1, Qt.AlignmentFlag.AlignVCenter)
         self.theme_values = ["system", "light", "dark"]
         self.theme_switch = SegmentedSwitch(["Системная", "Светлая", "Темная"])
         self.theme_switch.setFixedSize(330, 42)
@@ -257,10 +260,10 @@ class SettingsPage(QWidget):
         app_l.addWidget(theme_row)
 
         behavior = self._panel("Поведение")
-        behavior.setMinimumHeight(126)
+        behavior.setMinimumHeight(150)
         beh_l = behavior.layout()
         beh_l.setContentsMargins(18, 18, 18, 18)
-        beh_l.setSpacing(7)
+        beh_l.setSpacing(12)
         self.chk_no_tray = QCheckBox("Не сворачивать в трей при закрытии окна")
         self.chk_no_tray.setChecked(not self.config.get("stay_open_on_close", True))
         self.chk_no_tray.toggled.connect(self._save_behavior)
@@ -269,7 +272,7 @@ class SettingsPage(QWidget):
         self.chk_startup.toggled.connect(self._save_behavior)
         self.startup_mode_values = ["window", "tray"]
         self.startup_mode_select = QComboBox()
-        self.startup_mode_select.addItems(["Явно", "В трее"])
+        self.startup_mode_select.addItems(["Явно  ▾", "В трее  ▾"])
         self.startup_mode_select.currentIndexChanged.connect(self._save_behavior)
         self.chk_admin = QCheckBox("Всегда запускать от имени администратора")
         self.chk_admin.setChecked(self.config.get("always_run_as_admin", False))
@@ -392,7 +395,7 @@ class SettingsPage(QWidget):
     def _behavior_row(self, checkbox: QCheckBox, trailing: QWidget | None = None) -> QWidget:
         row = QWidget()
         row.setObjectName("BehaviorRow")
-        row.setFixedHeight(34)
+        row.setFixedHeight(38)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(10)
@@ -538,6 +541,7 @@ class SettingsPage(QWidget):
             else:
                 self._write_startup_registry(command)
         except Exception as e:
+            log_app_event("error", "startup", f"Could not update startup settings: {e}")
             QMessageBox.warning(self, "Автозапуск", f"Не удалось изменить автозапуск: {e}")
 
     def _delete_startup_registry(self):
@@ -579,6 +583,8 @@ class SettingsPage(QWidget):
                 ["schtasks", "/Delete", "/TN", APP_NAME, "/F"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         except Exception:
@@ -603,6 +609,8 @@ class SettingsPage(QWidget):
             ["powershell", "-NoProfile", "-Command", ps_command],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         if result.returncode != 0:
@@ -647,6 +655,7 @@ class SettingsPage(QWidget):
         try:
             change_data_parent(Path(folder))
         except Exception as e:
+            log_app_event("error", "data-dir", f"Could not move data directory: {e}")
             QMessageBox.critical(self, "Папка данных", f"Не удалось перенести данные:\n{e}")
             return
         save_config(self.config)
@@ -770,7 +779,7 @@ class AboutPage(QWidget):
         btn_zapret = QPushButton("Открыть папку zapret")
         add_press_effect(btn_zapret)
         btn_zapret.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.zm.zapret_path))))
-        btn_config = QPushButton("Открыть папку конфигов")
+        btn_config = QPushButton("Открыть папку данных")
         add_press_effect(btn_config)
         btn_config.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_data_dir()))))
         actions.addWidget(btn_github)
@@ -1029,6 +1038,7 @@ class MainWindow(QMainWindow):
 
     def _on_data_dir_changed(self):
         self.log_widget.reload_file_writer()
+        reload_app_logger()
         self.settings_page.refresh_storage_info()
 
     def _setup_tray(self):
@@ -1111,6 +1121,7 @@ class MainWindow(QMainWindow):
         self.settings_page.set_update_checking(False)
         if error:
             self.settings_page.show_update_error(error)
+            log_app_event("error", "app-update", f"Update check failed: {error}")
             return
         if info and info.is_newer:
             if (
@@ -1162,13 +1173,16 @@ class MainWindow(QMainWindow):
         if error:
             self.settings_page.set_update_progress(False)
             self.settings_page.lbl_update_status.setText(f"Не удалось установить: {error}")
+            log_app_event("error", "app-update", f"Update install failed: {error}")
             return
         try:
             launch_update_helper(Path(new_exe), get_logs_dir())
         except Exception as e:
             self.settings_page.set_update_progress(False)
             self.settings_page.lbl_update_status.setText(f"Не удалось запустить установщик: {e}")
+            log_app_event("error", "app-update", f"Could not launch update helper: {e}")
             return
+        log_app_event("info", "app-update", "Update helper launched")
         self.tray.hide()
         QApplication.quit()
 

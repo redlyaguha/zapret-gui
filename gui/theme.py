@@ -129,6 +129,10 @@ def app_stylesheet(theme_name: str) -> str:
         font-size: 15px;
         font-weight: 650;
     }}
+    QLabel#SettingLabel {{
+        font-size: 14px;
+        font-weight: 650;
+    }}
     QLabel#Muted {{
         color: {c["muted"]};
     }}
@@ -327,12 +331,20 @@ def app_stylesheet(theme_name: str) -> str:
         padding: 3px 8px;
         min-width: 190px;
     }}
+    QComboBox:disabled {{
+        color: rgba(127, 139, 156, 92);
+        background: rgba(127, 139, 156, 20);
+        border-color: rgba(127, 139, 156, 45);
+    }}
     QComboBox::drop-down {{
         border: 0;
         width: 28px;
         border-top-right-radius: 14px;
         border-bottom-right-radius: 14px;
         background: rgba(127, 139, 156, 20);
+    }}
+    QComboBox::drop-down:disabled {{
+        background: rgba(127, 139, 156, 14);
     }}
     QComboBox QAbstractItemView {{
         background: {c["panel_solid"]};

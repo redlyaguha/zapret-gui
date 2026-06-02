@@ -29,7 +29,8 @@ class ZapretManager:
     def _is_winws_running(self) -> bool:
         result = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq winws.exe"],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         return "winws.exe" in result.stdout
 
@@ -133,7 +134,8 @@ class ZapretManager:
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
                  f'$p = Start-Process -FilePath cmd.exe -ArgumentList @("/c", {self._ps_quote(command_with_log)}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode'],
-                capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=30
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                creationflags=subprocess.CREATE_NO_WINDOW, timeout=30
             )
         except subprocess.TimeoutExpired as e:
             raise RuntimeError("Elevated command timed out") from e
@@ -152,21 +154,24 @@ class ZapretManager:
     def _kill_taskkill(self) -> bool:
         result = subprocess.run(
             ["taskkill", "/IM", "winws.exe", "/F"],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         return result.returncode == 0
 
     def _kill_powershell(self) -> bool:
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", "Stop-Process -Name winws -Force -ErrorAction SilentlyContinue"],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         return result.returncode == 0
 
     def _is_service_installed(self) -> bool:
         result = subprocess.run(
             ["sc", "query", "zapret"],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         return "FAILED" not in result.stdout and result.stdout.strip() != ""
 
@@ -224,7 +229,8 @@ class ZapretManager:
     def _service_is_active(self, name: str) -> bool:
         result = subprocess.run(
             ["sc", "query", name],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if result.returncode != 0:
             return False
@@ -237,7 +243,8 @@ class ZapretManager:
         result = subprocess.run(
             ["reg", "query", r"HKLM\System\CurrentControlSet\Services\zapret",
              "/v", "zapret-discord-youtube"],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         for line in result.stdout.splitlines():
             parts = line.strip().split()
@@ -250,7 +257,8 @@ class ZapretManager:
     def _is_service_running(self) -> bool:
         result = subprocess.run(
             ["sc", "query", "zapret"],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         for line in result.stdout.splitlines():
             if "STATE" in line and "RUNNING" in line:
@@ -273,7 +281,8 @@ class ZapretManager:
     def _get_service_binpath(self) -> Optional[str]:
         result = subprocess.run(
             ["sc", "qc", "zapret"],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         for line in result.stdout.splitlines():
             if "BINARY_PATH_NAME" in line:
@@ -293,6 +302,7 @@ class ZapretManager:
             try:
                 result = subprocess.run(
                     attempt, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
                     creationflags=subprocess.CREATE_NO_WINDOW, timeout=5
                 )
                 for line in result.stdout.splitlines():
@@ -342,5 +352,6 @@ class ZapretManager:
     def run_powershell(self, script: str):
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", script],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )

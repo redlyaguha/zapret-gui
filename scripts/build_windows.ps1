@@ -31,4 +31,8 @@ if (Test-Path $ArchivePath) {
 }
 
 Compress-Archive -Path $ExePath -DestinationPath $ArchivePath
+$HashPath = "$ArchivePath.sha256"
+$Hash = (Get-FileHash -Algorithm SHA256 -Path $ArchivePath).Hash.ToLowerInvariant()
+"$Hash $ArchiveName" | Set-Content -Path $HashPath -Encoding ASCII
 Write-Host "Created $ArchivePath"
+Write-Host "Created $HashPath"

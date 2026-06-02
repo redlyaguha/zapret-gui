@@ -1,5 +1,6 @@
 from pathlib import Path
 import ctypes
+from datetime import date
 import sys
 import webbrowser
 
@@ -17,10 +18,13 @@ from core.app_info import APP_NAME, APP_VERSION, GITHUB_REPO, get_display_name
 from core.assets import get_asset_path
 from core.service_controller import ServiceController
 from core.zapret_manager import ZapretManager
-from gui.app_update import AppUpdateInfo, check_app_update, open_releases
+from gui.app_update import (
+    AppUpdateInfo, check_app_update, download_and_verify_update, extract_app_exe,
+    launch_update_helper, open_releases,
+)
 from gui.config import (
     DATA_DIR_NAME, change_data_parent, clear_logs, data_dir_from_parent,
-    format_size, get_data_dir, load_config, logs_size_bytes, save_config,
+    format_size, get_data_dir, get_logs_dir, load_config, logs_size_bytes, save_config,
 )
 from gui.effects import add_press_effect
 from gui.log_widget import LogWidget
@@ -153,10 +157,33 @@ class InstallDialog(QDialog):
 class AppUpdateWorker(QThread):
     finished_signal = Signal(object, str)
 
+    def __init__(self, include_prerelease: bool, require_assets: bool):
+        super().__init__()
+        self.include_prerelease = include_prerelease
+        self.require_assets = require_assets
+
     def run(self):
         try:
-            info = check_app_update()
+            info = check_app_update(self.include_prerelease, self.require_assets)
             self.finished_signal.emit(info, "")
+        except Exception as e:
+            self.finished_signal.emit(None, str(e))
+
+
+class AppUpdateInstallWorker(QThread):
+    progress = Signal(int)
+    finished_signal = Signal(object, str)
+
+    def __init__(self, info: AppUpdateInfo, updates_dir: Path):
+        super().__init__()
+        self.info = info
+        self.updates_dir = updates_dir
+
+    def run(self):
+        try:
+            zip_path = download_and_verify_update(self.info, self.updates_dir, self.progress.emit)
+            exe_path = extract_app_exe(zip_path, zip_path.parent)
+            self.finished_signal.emit(exe_path, "")
         except Exception as e:
             self.finished_signal.emit(None, str(e))
 
@@ -165,6 +192,8 @@ class SettingsPage(QWidget):
     theme_changed = Signal(str)
     config_changed = Signal()
     check_updates_requested = Signal()
+    install_update_requested = Signal()
+    skip_update_requested = Signal()
     zapret_path_changed = Signal(Path)
     data_dir_changed = Signal()
 
@@ -244,15 +273,46 @@ class SettingsPage(QWidget):
 
         updates = self._panel("Обновления zapret-gui")
         upd_l = updates.layout()
+        self.chk_app_auto_update = QCheckBox("Автоматически проверять обновления")
+        self.chk_app_auto_update.setChecked(self.config.get("app_auto_update_enabled", True))
+        self.chk_app_auto_update.toggled.connect(self._save_update_settings)
+        self.chk_app_prerelease = QCheckBox("Получать beta/prerelease")
+        self.chk_app_prerelease.setChecked(self.config.get("app_update_include_prerelease", False))
+        self.chk_app_prerelease.toggled.connect(self._save_update_settings)
+        upd_l.addWidget(self._behavior_row(self.chk_app_auto_update))
+        upd_l.addWidget(self._behavior_row(self.chk_app_prerelease))
+
         upd_row = QHBoxLayout()
         self.lbl_update_status = QLabel("Проверка выполняется только для приложения, не для zapret.")
         self.lbl_update_status.setObjectName("Muted")
-        btn_check = QPushButton("Проверить обновления")
-        add_press_effect(btn_check)
-        btn_check.clicked.connect(self.check_updates_requested.emit)
+        self.btn_check_app_update = QPushButton("Проверить обновления")
+        add_press_effect(self.btn_check_app_update)
+        self.btn_check_app_update.clicked.connect(lambda _checked=False: self.check_updates_requested.emit())
         upd_row.addWidget(self.lbl_update_status, 1)
-        upd_row.addWidget(btn_check)
+        upd_row.addWidget(self.btn_check_app_update)
         upd_l.addLayout(upd_row)
+
+        self.app_update_progress = QProgressBar()
+        self.app_update_progress.setVisible(False)
+        upd_l.addWidget(self.app_update_progress)
+
+        update_actions = QHBoxLayout()
+        self.btn_install_app_update = QPushButton("Обновить")
+        self.btn_install_app_update.setObjectName("PrimaryButton")
+        add_press_effect(self.btn_install_app_update)
+        self.btn_install_app_update.clicked.connect(lambda _checked=False: self.install_update_requested.emit())
+        self.btn_later_app_update = QPushButton("Позже")
+        add_press_effect(self.btn_later_app_update)
+        self.btn_later_app_update.clicked.connect(self._hide_update_actions)
+        self.btn_skip_app_update = QPushButton("Пропустить версию")
+        add_press_effect(self.btn_skip_app_update)
+        self.btn_skip_app_update.clicked.connect(lambda _checked=False: self.skip_update_requested.emit())
+        update_actions.addWidget(self.btn_install_app_update)
+        update_actions.addWidget(self.btn_later_app_update)
+        update_actions.addWidget(self.btn_skip_app_update)
+        update_actions.addStretch()
+        upd_l.addLayout(update_actions)
+        self._set_update_actions_visible(False)
 
         path_panel = self._panel("Папка zapret")
         path_l = path_panel.layout()
@@ -338,7 +398,8 @@ class SettingsPage(QWidget):
         info = self.config.get("deferred_app_update")
         self.update_banner.setVisible(bool(info))
         if info:
-            self.update_text.setText(f"Доступно обновление zapret-gui: {info.get('latest_version', '')}")
+            label = "beta" if info.get("is_prerelease") else "stable"
+            self.update_text.setText(f"Доступно обновление zapret-gui: {info.get('latest_version', '')} ({label})")
 
     def _sync_behavior_controls(self):
         controls = (
@@ -351,6 +412,56 @@ class SettingsPage(QWidget):
         self.chk_startup.setChecked(self.config.get("launch_on_startup", False))
         for control in controls:
             control.blockSignals(False)
+
+    def _sync_update_controls(self):
+        controls = (
+            self.chk_app_auto_update,
+            self.chk_app_prerelease,
+        )
+        for control in controls:
+            control.blockSignals(True)
+        self.chk_app_auto_update.setChecked(self.config.get("app_auto_update_enabled", True))
+        self.chk_app_prerelease.setChecked(self.config.get("app_update_include_prerelease", False))
+        for control in controls:
+            control.blockSignals(False)
+
+    def _save_update_settings(self):
+        self.config["app_auto_update_enabled"] = self.chk_app_auto_update.isChecked()
+        self.config["app_update_include_prerelease"] = self.chk_app_prerelease.isChecked()
+        save_config(self.config)
+        self.config_changed.emit()
+
+    def _set_update_actions_visible(self, visible: bool):
+        for button in (
+            self.btn_install_app_update,
+            self.btn_later_app_update,
+            self.btn_skip_app_update,
+        ):
+            button.setVisible(visible)
+
+    def _hide_update_actions(self):
+        self._set_update_actions_visible(False)
+
+    def set_update_checking(self, checking: bool):
+        self.btn_check_app_update.setEnabled(not checking)
+        self.btn_install_app_update.setEnabled(not checking)
+
+    def show_update_available(self, info: AppUpdateInfo):
+        label = "beta" if info.is_prerelease else "stable"
+        self.lbl_update_status.setText(f"Доступна версия {info.latest_version} ({label}).")
+        self._set_update_actions_visible(True)
+
+    def show_no_update(self):
+        self.lbl_update_status.setText("Установлена актуальная версия.")
+        self._set_update_actions_visible(False)
+
+    def show_update_error(self, error: str):
+        self.lbl_update_status.setText(f"Не удалось проверить: {error}")
+        self._set_update_actions_visible(False)
+
+    def set_update_progress(self, visible: bool, value: int = 0):
+        self.app_update_progress.setVisible(visible)
+        self.app_update_progress.setValue(value)
 
     def refresh_storage_info(self):
         self.lbl_data_path.setText(str(get_data_dir()))
@@ -475,10 +586,15 @@ class SettingsPage(QWidget):
             "launch_on_startup": False,
             "deferred_app_update": None,
             "last_strategy": self.config.get("last_strategy", ""),
+            "app_auto_update_enabled": True,
+            "app_update_include_prerelease": False,
+            "last_app_update_check": "",
+            "skipped_app_version": "",
         })
         save_config(self.config)
         self.theme_switch.set_index(0, emit=False)
         self._sync_behavior_controls()
+        self._sync_update_controls()
         self.refresh_banner()
         self.theme_changed.emit("system")
         self.config_changed.emit()
@@ -559,6 +675,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = load_config()
         self.initial_update = initial_update
+        self.pending_app_update: AppUpdateInfo | None = None
+        self._manual_update_check = False
         self.sidebar_expanded = False
         self.nav_specs = {
             "dpi": ("D", "DPI"),
@@ -640,6 +758,8 @@ class MainWindow(QMainWindow):
         self.settings_page.theme_changed.connect(self._apply_theme)
         self.settings_page.config_changed.connect(self._on_config_changed)
         self.settings_page.check_updates_requested.connect(self._check_app_updates)
+        self.settings_page.install_update_requested.connect(self._install_app_update)
+        self.settings_page.skip_update_requested.connect(self._skip_app_update)
         self.settings_page.zapret_path_changed.connect(self._change_zapret_path)
         self.settings_page.data_dir_changed.connect(self._on_data_dir_changed)
 
@@ -840,26 +960,108 @@ class MainWindow(QMainWindow):
         self.strategy_widget.stop_current_strategy()
         self._update_tray_status()
 
-    def _check_app_updates(self):
+    def maybe_check_app_updates(self):
+        if not self.config.get("app_auto_update_enabled", True):
+            return
+        today = date.today().isoformat()
+        if self.config.get("last_app_update_check") == today:
+            return
+        self.config["last_app_update_check"] = today
+        save_config(self.config)
+        self._check_app_updates(manual=False)
+
+    def _check_app_updates(self, manual: bool = True):
+        self._manual_update_check = manual
+        include_prerelease = self.config.get("app_update_include_prerelease", False)
+        require_assets = bool(getattr(sys, "frozen", False))
         self.settings_page.lbl_update_status.setText("Проверяем обновления...")
-        self._app_update_worker = AppUpdateWorker()
+        self.settings_page.set_update_checking(True)
+        self.settings_page.set_update_progress(False)
+        self._app_update_worker = AppUpdateWorker(include_prerelease, require_assets)
         self._app_update_worker.finished_signal.connect(self._on_app_update_checked)
         self._app_update_worker.start()
 
     def _on_app_update_checked(self, info, error: str):
+        self.settings_page.set_update_checking(False)
         if error:
-            self.settings_page.lbl_update_status.setText(f"Не удалось проверить: {error}")
+            self.settings_page.show_update_error(error)
             return
         if info and info.is_newer:
+            if (
+                not self._manual_update_check
+                and self.config.get("skipped_app_version") == info.latest_version
+            ):
+                self.settings_page.lbl_update_status.setText("Найденная версия пропущена.")
+                return
+            self.pending_app_update = info
             self._defer_update(info)
-            self.settings_page.lbl_update_status.setText(f"Доступна версия {info.latest_version}.")
+            self.settings_page.show_update_available(info)
         else:
-            self.settings_page.lbl_update_status.setText("Установлена актуальная версия.")
+            self.pending_app_update = None
+            if self.config.get("deferred_app_update"):
+                self.config["deferred_app_update"] = None
+                save_config(self.config)
+                self.settings_page.refresh_banner()
+            self.settings_page.show_no_update()
+
+    def _install_app_update(self):
+        if not self.pending_app_update:
+            return
+
+        if not getattr(sys, "frozen", False):
+            webbrowser.open(self.pending_app_update.release_url)
+            self.settings_page.lbl_update_status.setText("Автоустановка доступна только для portable .exe.")
+            return
+
+        reply = QMessageBox.warning(
+            self,
+            "Обновить zapret-gui",
+            "Приложение скачает обновление, проверит SHA256, закроется, заменит exe и перезапустится.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            return
+
+        self.settings_page.set_update_checking(True)
+        self.settings_page.set_update_progress(True, 0)
+        updates_dir = get_data_dir() / "updates"
+        self._app_update_install_worker = AppUpdateInstallWorker(self.pending_app_update, updates_dir)
+        self._app_update_install_worker.progress.connect(lambda value: self.settings_page.set_update_progress(True, value))
+        self._app_update_install_worker.finished_signal.connect(self._on_app_update_downloaded)
+        self._app_update_install_worker.start()
+
+    def _on_app_update_downloaded(self, new_exe, error: str):
+        self.settings_page.set_update_checking(False)
+        if error:
+            self.settings_page.set_update_progress(False)
+            self.settings_page.lbl_update_status.setText(f"Не удалось установить: {error}")
+            return
+        try:
+            launch_update_helper(Path(new_exe), get_logs_dir())
+        except Exception as e:
+            self.settings_page.set_update_progress(False)
+            self.settings_page.lbl_update_status.setText(f"Не удалось запустить установщик: {e}")
+            return
+        self.tray.hide()
+        QApplication.quit()
+
+    def _skip_app_update(self):
+        if not self.pending_app_update:
+            return
+        self.config["skipped_app_version"] = self.pending_app_update.latest_version
+        self.config["deferred_app_update"] = None
+        save_config(self.config)
+        self.pending_app_update = None
+        self.settings_page._set_update_actions_visible(False)
+        self.settings_page.refresh_banner()
+        self.settings_page.lbl_update_status.setText("Версия пропущена.")
 
     def _defer_update(self, info: AppUpdateInfo):
         self.config["deferred_app_update"] = {
             "latest_version": info.latest_version,
             "release_url": info.release_url,
+            "is_prerelease": info.is_prerelease,
         }
         save_config(self.config)
         self.settings_page.refresh_banner()

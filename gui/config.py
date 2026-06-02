@@ -19,6 +19,10 @@ DEFAULT_CONFIG = {
     "launch_on_startup": False,
     "deferred_app_update": None,
     "last_strategy": "",
+    "app_auto_update_enabled": True,
+    "app_update_include_prerelease": False,
+    "last_app_update_check": "",
+    "skipped_app_version": "",
 }
 
 

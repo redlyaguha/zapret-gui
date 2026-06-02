@@ -167,6 +167,8 @@ class DropdownSelect(QPushButton):
 
 
 class StrategyWidget(QWidget):
+    strategy_started = Signal(str)
+
     def __init__(self, zapret_manager, service_controller, log_widget, parent=None):
         super().__init__(parent)
         self.zm = zapret_manager
@@ -458,6 +460,31 @@ class StrategyWidget(QWidget):
         else:
             self._start()
 
+    def start_last_strategy(self, strategy_name: str) -> bool:
+        if not strategy_name:
+            self._state = "error"
+            self._last_error = "Последняя стратегия не выбрана"
+            self.log.log(self._last_error, "error")
+            self._update_status()
+            return False
+        for idx, bat in enumerate(self.strategies):
+            if bat.stem == strategy_name:
+                self.list_widget.setCurrentRow(idx)
+                self._start()
+                return True
+        self._state = "error"
+        self._last_error = f"Стратегия «{strategy_name}» не найдена"
+        self.log.log(self._last_error, "error")
+        self._update_status()
+        return False
+
+    def stop_current_strategy(self) -> bool:
+        if not self.zm.is_running():
+            self._update_status(auto_detect=True)
+            return False
+        self._stop()
+        return True
+
     def _start(self):
         idx = self.list_widget.currentRow()
         if not (0 <= idx < len(self.strategies)):
@@ -514,11 +541,14 @@ class StrategyWidget(QWidget):
         target = self._poll_target
 
         if target == "start" and running:
+            started_strategy = self.zm.current_strategy or self._pending_strategy_name
             self._poll_timer.stop()
             self._poll_target = None
             self._state = "idle"
             self._pending_strategy_name = None
             self.log.log("Стратегия запущена", "ok")
+            if started_strategy and started_strategy != "__service__":
+                self.strategy_started.emit(started_strategy)
             self._update_status()
         elif target == "stop" and not running:
             self._poll_timer.stop()

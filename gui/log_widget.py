@@ -2,12 +2,34 @@ from PySide6.QtWidgets import QFrame, QWidget, QVBoxLayout, QScrollArea
 from PySide6.QtCore import Signal, QDateTime, Qt
 from typing import Optional
 
+from gui.config import get_logs_dir
+
+
+class LogFileWriter:
+    def __init__(self):
+        self.logs_dir = get_logs_dir()
+
+    def set_logs_dir(self, logs_dir):
+        self.logs_dir = logs_dir
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+    def write(self, timestamp: QDateTime, level: str, message: str):
+        try:
+            self.logs_dir.mkdir(parents=True, exist_ok=True)
+            path = self.logs_dir / f"zapret-gui-{timestamp.toString('yyyy-MM-dd')}.log"
+            line = f"[{timestamp.toString('yyyy-MM-dd HH:mm:ss')}] [{level.upper()}] {message}\n"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+
 
 class LogWidget(QWidget):
     log_received = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.file_writer = LogFileWriter()
         self._build_ui()
 
     def _build_ui(self):
@@ -40,8 +62,9 @@ class LogWidget(QWidget):
         return Qt.AlignmentFlag.AlignTop
 
     def log(self, message: str, level: str = "info"):
-        ts = QDateTime.currentDateTime().toString("HH:mm:ss")
-        html = f'<span style="color:#8b95a7;">[{ts}]</span> '
+        timestamp = QDateTime.currentDateTime()
+        self.file_writer.write(timestamp, level, message)
+        html = f'<span style="color:#8b95a7;">[{timestamp.toString("HH:mm:ss")}]</span> '
         if level == "ok":
             html += f'<span style="color:#53d18a;">{message}</span>'
         elif level == "error":
@@ -54,6 +77,9 @@ class LogWidget(QWidget):
             html += f'<span style="color:#d9dee8;">{message}</span>'
         html += "<br>"
         self.log_received.emit(html, "")
+
+    def reload_file_writer(self):
+        self.file_writer.set_logs_dir(get_logs_dir())
 
     def _append_log_line(self, html: str, _):
         from PySide6.QtWidgets import QLabel

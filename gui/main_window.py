@@ -18,7 +18,10 @@ from core.assets import get_asset_path
 from core.service_controller import ServiceController
 from core.zapret_manager import ZapretManager
 from gui.app_update import AppUpdateInfo, check_app_update, open_releases
-from gui.config import load_config, save_config
+from gui.config import (
+    DATA_DIR_NAME, change_data_parent, clear_logs, data_dir_from_parent,
+    format_size, get_data_dir, load_config, logs_size_bytes, save_config,
+)
 from gui.effects import add_press_effect
 from gui.log_widget import LogWidget
 from gui.strategy_widget import SegmentedSwitch, StrategyWidget
@@ -163,6 +166,7 @@ class SettingsPage(QWidget):
     config_changed = Signal()
     check_updates_requested = Signal()
     zapret_path_changed = Signal(Path)
+    data_dir_changed = Signal()
 
     def __init__(self, config: dict, zapret_path: Path, parent=None):
         super().__init__(parent)
@@ -224,7 +228,7 @@ class SettingsPage(QWidget):
         app_l.addWidget(theme_row)
 
         behavior = self._panel("Поведение")
-        behavior.setMinimumHeight(168)
+        behavior.setMinimumHeight(126)
         beh_l = behavior.layout()
         beh_l.setContentsMargins(18, 18, 18, 18)
         beh_l.setSpacing(7)
@@ -234,11 +238,8 @@ class SettingsPage(QWidget):
         self.chk_startup = QCheckBox("Запускать вместе с Windows")
         self.chk_startup.setChecked(self.config.get("launch_on_startup", False))
         self.chk_startup.toggled.connect(self._save_behavior)
-        self.chk_logs = QCheckBox("Показывать расширенные логи")
-        self.chk_logs.toggled.connect(self._save_behavior)
         beh_l.addWidget(self._behavior_row(self.chk_no_tray))
         beh_l.addWidget(self._behavior_row(self.chk_startup))
-        beh_l.addWidget(self._behavior_row(self.chk_logs))
         self._sync_behavior_controls()
 
         updates = self._panel("Обновления zapret-gui")
@@ -265,6 +266,29 @@ class SettingsPage(QWidget):
         path_row.addWidget(btn_path)
         path_l.addLayout(path_row)
 
+        data_panel = self._panel("Папка данных")
+        data_l = data_panel.layout()
+        data_row = QHBoxLayout()
+        self.lbl_data_path = QLabel(str(get_data_dir()))
+        self.lbl_data_path.setObjectName("Pill")
+        btn_data_path = QPushButton("Изменить")
+        add_press_effect(btn_data_path)
+        btn_data_path.clicked.connect(self._change_data_path)
+        data_row.addWidget(self.lbl_data_path, 1)
+        data_row.addWidget(btn_data_path)
+        data_l.addLayout(data_row)
+
+        logs_row = QHBoxLayout()
+        self.lbl_logs_size = QLabel("")
+        self.lbl_logs_size.setObjectName("Muted")
+        btn_clear_logs = QPushButton("Очистить логи")
+        btn_clear_logs.setObjectName("DangerButton")
+        add_press_effect(btn_clear_logs)
+        btn_clear_logs.clicked.connect(self._clear_log_files)
+        logs_row.addWidget(self.lbl_logs_size, 1)
+        logs_row.addWidget(btn_clear_logs)
+        data_l.addLayout(logs_row)
+
         tools = self._panel("Сервис")
         tools_l = tools.layout()
         tools_row = QHBoxLayout()
@@ -280,8 +304,10 @@ class SettingsPage(QWidget):
         root.addWidget(behavior)
         root.addWidget(updates)
         root.addWidget(path_panel)
+        root.addWidget(data_panel)
         root.addWidget(tools)
         root.addStretch()
+        self.refresh_storage_info()
         self.refresh_banner()
 
     def _panel(self, title: str) -> QFrame:
@@ -318,15 +344,17 @@ class SettingsPage(QWidget):
         controls = (
             self.chk_no_tray,
             self.chk_startup,
-            self.chk_logs,
         )
         for control in controls:
             control.blockSignals(True)
         self.chk_no_tray.setChecked(not self.config.get("stay_open_on_close", True))
         self.chk_startup.setChecked(self.config.get("launch_on_startup", False))
-        self.chk_logs.setChecked(self.config.get("advanced_logs", True))
         for control in controls:
             control.blockSignals(False)
+
+    def refresh_storage_info(self):
+        self.lbl_data_path.setText(str(get_data_dir()))
+        self.lbl_logs_size.setText(f"Логи занимают: {format_size(logs_size_bytes())}")
 
     def _clear_deferred_update(self):
         self.config["deferred_app_update"] = None
@@ -343,7 +371,6 @@ class SettingsPage(QWidget):
     def _save_behavior(self):
         self.config["stay_open_on_close"] = not self.chk_no_tray.isChecked()
         self.config["launch_on_startup"] = self.chk_startup.isChecked()
-        self.config["advanced_logs"] = self.chk_logs.isChecked()
         self._set_startup(self.chk_startup.isChecked())
         save_config(self.config)
         self.config_changed.emit()
@@ -387,6 +414,47 @@ class SettingsPage(QWidget):
         self.lbl_path.setText(str(path))
         self.zapret_path_changed.emit(path)
 
+    def _change_data_path(self):
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            f"Выберите родительскую папку для {DATA_DIR_NAME}",
+            str(get_data_dir().parent),
+        )
+        if not folder:
+            return
+        target = data_dir_from_parent(Path(folder))
+        reply = QMessageBox.information(
+            self,
+            "Папка данных",
+            f"Будет создана или использована папка:\n{target}\n\nТекущие настройки и логи будут перенесены.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Ok,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            return
+        try:
+            change_data_parent(Path(folder))
+        except Exception as e:
+            QMessageBox.critical(self, "Папка данных", f"Не удалось перенести данные:\n{e}")
+            return
+        save_config(self.config)
+        self.refresh_storage_info()
+        self.data_dir_changed.emit()
+
+    def _clear_log_files(self):
+        reply = QMessageBox.warning(
+            self,
+            "Очистить логи",
+            "Удалить все сохраненные файлы логов?",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            return
+        clear_logs()
+        self.refresh_storage_info()
+        self.data_dir_changed.emit()
+
     def _reset_settings(self):
         reply = QMessageBox.warning(
             self,
@@ -405,8 +473,8 @@ class SettingsPage(QWidget):
             "theme": "system",
             "stay_open_on_close": True,
             "launch_on_startup": False,
-            "advanced_logs": True,
             "deferred_app_update": None,
+            "last_strategy": self.config.get("last_strategy", ""),
         })
         save_config(self.config)
         self.theme_switch.set_index(0, emit=False)
@@ -562,6 +630,7 @@ class MainWindow(QMainWindow):
         self.telegram_page = TelegramPage()
         self.settings_page = SettingsPage(self.config, self.zapret_path)
         self.about_page = AboutPage(self.zm)
+        self.strategy_widget.strategy_started.connect(self._remember_strategy)
 
         self.stack.addWidget(self.strategy_widget)
         self.stack.addWidget(self.telegram_page)
@@ -572,6 +641,7 @@ class MainWindow(QMainWindow):
         self.settings_page.config_changed.connect(self._on_config_changed)
         self.settings_page.check_updates_requested.connect(self._check_app_updates)
         self.settings_page.zapret_path_changed.connect(self._change_zapret_path)
+        self.settings_page.data_dir_changed.connect(self._on_data_dir_changed)
 
         self._build_sidebar()
         self._switch_page("dpi")
@@ -721,14 +791,21 @@ class MainWindow(QMainWindow):
         app.setStyleSheet(app_stylesheet(theme_name))
 
     def _on_config_changed(self):
-        self.log_widget.setVisible(self.config.get("advanced_logs", True))
         self.settings_page.refresh_banner()
+        self.settings_page.refresh_storage_info()
+
+    def _on_data_dir_changed(self):
+        self.log_widget.reload_file_writer()
+        self.settings_page.refresh_storage_info()
 
     def _setup_tray(self):
         self.tray = TrayManager(self)
         self.tray.show_window.connect(self._toggle_visible)
+        self.tray.start_last_strategy.connect(self._start_last_strategy_from_tray)
+        self.tray.stop_strategy.connect(self._stop_strategy_from_tray)
         self.tray.quit_app.connect(self._quit)
         self.tray.show()
+        self._update_tray_status()
 
     def _toggle_visible(self):
         if self.isVisible():
@@ -746,6 +823,22 @@ class MainWindow(QMainWindow):
     def _update_tray_status(self):
         if hasattr(self, "zm"):
             self.tray.set_status(self.zm.is_running())
+
+    def _remember_strategy(self, strategy_name: str):
+        self.config["last_strategy"] = strategy_name
+        save_config(self.config)
+
+    def _start_last_strategy_from_tray(self):
+        strategy_name = self.config.get("last_strategy", "")
+        if self.strategy_widget.start_last_strategy(strategy_name):
+            self._switch_page("dpi")
+        else:
+            self._toggle_visible()
+        self._update_tray_status()
+
+    def _stop_strategy_from_tray(self):
+        self.strategy_widget.stop_current_strategy()
+        self._update_tray_status()
 
     def _check_app_updates(self):
         self.settings_page.lbl_update_status.setText("Проверяем обновления...")

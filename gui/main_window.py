@@ -1,11 +1,12 @@
 from pathlib import Path
 import ctypes
 from datetime import date
+import math
 import sys
 import webbrowser
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QThread, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QIcon, QDesktopServices
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QThread, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QIcon, QDesktopServices, QPainter, QPen, QPixmap
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QDialog, QFileDialog,
@@ -818,10 +819,10 @@ class MainWindow(QMainWindow):
         self._manual_update_check = False
         self.sidebar_expanded = False
         self.nav_specs = {
-            "dpi": ("D", "DPI"),
-            "telegram": ("T", "Telegram"),
-            "settings": ("⚙", "Настройки"),
-            "about": ("i", "О приложении"),
+            "dpi": ("asset:assets/zapret_winws_icon.png", "DPI"),
+            "telegram": ("asset:assets/tg_ws_proxy_icon.ico", "Telegram"),
+            "settings": ("settings", "Настройки"),
+            "about": ("about", "О приложении"),
         }
 
         app = QApplication.instance()
@@ -935,8 +936,8 @@ class MainWindow(QMainWindow):
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
         for key in ["dpi", "telegram"]:
-            icon, text = self.nav_specs[key]
-            btn = self._nav_button(icon, text)
+            icon_key, text = self.nav_specs[key]
+            btn = self._nav_button(icon_key, text)
             btn.clicked.connect(lambda _=False, k=key: self._switch_page(k))
             self.nav_group.addButton(btn)
             self.nav_buttons[key] = btn
@@ -948,18 +949,20 @@ class MainWindow(QMainWindow):
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(8)
         for key in ["settings", "about"]:
-            icon, text = self.nav_specs[key]
-            btn = self._nav_button(icon, text)
+            icon_key, text = self.nav_specs[key]
+            btn = self._nav_button(icon_key, text)
             btn.clicked.connect(lambda _=False, k=key: self._switch_page(k))
             self.nav_group.addButton(btn)
             self.nav_buttons[key] = btn
             bottom_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self.sidebar_layout.addWidget(bottom)
 
-    def _nav_button(self, icon: str, text: str) -> QPushButton:
-        label = f"{icon}  {text}" if self.sidebar_expanded else icon
+    def _nav_button(self, icon_key: str, text: str) -> QPushButton:
+        label = text if self.sidebar_expanded else ""
         btn = QPushButton(label)
         btn.setObjectName("NavButton")
+        btn.setIcon(self._nav_icon(icon_key))
+        btn.setIconSize(QSize(24, 24))
         btn.setCheckable(True)
         btn.setToolTip(text)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -972,6 +975,54 @@ class MainWindow(QMainWindow):
             btn.setFixedWidth(48)
         add_press_effect(btn)
         return btn
+
+    def _nav_icon(self, icon_key: str) -> QIcon:
+        if icon_key.startswith("asset:"):
+            return QIcon(str(get_asset_path(icon_key.removeprefix("asset:"))))
+        if icon_key == "settings":
+            return self._settings_icon()
+        if icon_key == "about":
+            return self._about_icon()
+        return QIcon()
+
+    def _settings_icon(self) -> QIcon:
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#111111"), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        center = 32
+        for index in range(8):
+            angle = math.radians(index * 45)
+            inner = 21
+            outer = 27
+            painter.drawLine(
+                int(center + math.cos(angle) * inner),
+                int(center + math.sin(angle) * inner),
+                int(center + math.cos(angle) * outer),
+                int(center + math.sin(angle) * outer),
+            )
+        painter.drawEllipse(17, 17, 30, 30)
+        painter.drawEllipse(27, 27, 10, 10)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _about_icon(self) -> QIcon:
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#111111"), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(13, 13, 38, 38)
+        painter.drawPoint(32, 25)
+        painter.drawLine(32, 32, 32, 42)
+        painter.end()
+        return QIcon(pixmap)
 
     def _toggle_sidebar(self):
         current = self._current_key()
@@ -993,8 +1044,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "menu_label"):
             self.menu_label.setVisible(self.sidebar_expanded)
         for key, btn in getattr(self, "nav_buttons", {}).items():
-            icon, text = self.nav_specs[key]
-            btn.setText(f"{icon}  {text}" if self.sidebar_expanded else icon)
+            icon_key, text = self.nav_specs[key]
+            btn.setIcon(self._nav_icon(icon_key))
+            btn.setIconSize(QSize(24, 24))
+            btn.setText(text if self.sidebar_expanded else "")
             btn.setProperty("expanded", self.sidebar_expanded)
             btn.style().unpolish(btn)
             btn.style().polish(btn)

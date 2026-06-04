@@ -12,6 +12,8 @@ a = Analysis(
     datas=[
         (str(project_root / "assets" / "app_icon.ico"), "assets"),
         (str(project_root / "assets" / "app_icon.png"), "assets"),
+        (str(project_root / "assets" / "zapret_winws_icon.png"), "assets"),
+        (str(project_root / "assets" / "tg_ws_proxy_icon.ico"), "assets"),
     ],
     hiddenimports=[],
     hookspath=[],

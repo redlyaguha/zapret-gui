@@ -216,6 +216,15 @@ def app_stylesheet(theme_name: str) -> str:
         border-radius: 18px;
         text-align: center;
     }}
+    QFrame#NavIconFrame {{
+        min-width: 48px;
+        max-width: 48px;
+        min-height: 48px;
+        max-height: 48px;
+        border-radius: 18px;
+        border: 1px solid {c["border"]};
+        background: {c["panel_solid"]};
+    }}
     QPushButton#SelectButton {{
         min-height: 36px;
         max-height: 36px;

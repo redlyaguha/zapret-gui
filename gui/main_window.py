@@ -941,7 +941,7 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(lambda _=False, k=key: self._switch_page(k))
             self.nav_group.addButton(btn)
             self.nav_buttons[key] = btn
-            self.sidebar_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
+            self.sidebar_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.sidebar_layout.addStretch()
         bottom = QWidget()
@@ -954,7 +954,7 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(lambda _=False, k=key: self._switch_page(k))
             self.nav_group.addButton(btn)
             self.nav_buttons[key] = btn
-            bottom_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
+            bottom_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignLeft)
         self.sidebar_layout.addWidget(bottom)
 
     def _nav_button(self, icon_key: str, text: str) -> QPushButton:
@@ -967,17 +967,25 @@ class MainWindow(QMainWindow):
         btn.setFixedHeight(48)
 
         content = QHBoxLayout(btn)
-        content.setSpacing(10)
+        content.setSpacing(6)
         content.setContentsMargins(0, 0, 0, 0)
-        icon_label = QLabel(btn)
+        icon_frame = QFrame(btn)
+        icon_frame.setObjectName("NavIconFrame")
+        icon_frame.setFixedSize(48, 48)
+        icon_frame.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        icon_frame_layout = QHBoxLayout(icon_frame)
+        icon_frame_layout.setContentsMargins(0, 0, 0, 0)
+        icon_label = QLabel(icon_frame)
         icon_label.setFixedSize(24, 24)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        icon_frame_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
         text_label = QLabel(text, btn)
         text_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        content.addWidget(icon_label)
+        content.addWidget(icon_frame)
         content.addWidget(text_label)
         content.addStretch()
+        btn._nav_icon_frame = icon_frame
         btn._nav_icon_label = icon_label
         btn._nav_text_label = text_label
         btn._nav_layout = content
@@ -1003,10 +1011,7 @@ class MainWindow(QMainWindow):
         icon_label.setPixmap(self._nav_icon(icon_key).pixmap(QSize(24, 24)))
         text_label.setText(text)
         text_label.setVisible(self.sidebar_expanded)
-        if self.sidebar_expanded:
-            content.setContentsMargins(16, 0, 12, 0)
-        else:
-            content.setContentsMargins(12, 0, 12, 0)
+        content.setContentsMargins(0, 0, 12 if self.sidebar_expanded else 0, 0)
         self._style_nav_label(btn)
 
     def _style_nav_label(self, btn: QPushButton):

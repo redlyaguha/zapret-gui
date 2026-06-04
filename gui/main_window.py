@@ -5,8 +5,8 @@ import math
 import sys
 import webbrowser
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QThread, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QIcon, QDesktopServices, QPainter, QPen, QPixmap
+from PySide6.QtCore import QPointF, QEasingCurve, QPropertyAnimation, QSize, Qt, QThread, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QIcon, QDesktopServices, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QDialog, QFileDialog,
@@ -31,7 +31,7 @@ from gui.config import (
 from gui.effects import add_press_effect
 from gui.log_widget import LogWidget
 from gui.strategy_widget import DropdownSelect, SegmentedSwitch, StrategyWidget
-from gui.theme import apply_app_theme, app_stylesheet
+from gui.theme import apply_app_theme, app_stylesheet, palette as theme_palette
 from gui.tray_manager import TrayManager
 from updater.installer import install_zapret
 
@@ -958,16 +958,31 @@ class MainWindow(QMainWindow):
         self.sidebar_layout.addWidget(bottom)
 
     def _nav_button(self, icon_key: str, text: str) -> QPushButton:
-        label = text if self.sidebar_expanded else ""
-        btn = QPushButton(label)
+        btn = QPushButton("")
         btn.setObjectName("NavButton")
-        btn.setIcon(self._nav_icon(icon_key))
-        btn.setIconSize(QSize(24, 24))
         btn.setCheckable(True)
         btn.setToolTip(text)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn.setProperty("expanded", self.sidebar_expanded)
         btn.setFixedHeight(48)
+
+        content = QHBoxLayout(btn)
+        content.setSpacing(10)
+        content.setContentsMargins(0, 0, 0, 0)
+        icon_label = QLabel(btn)
+        icon_label.setFixedSize(24, 24)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        text_label = QLabel(text, btn)
+        text_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        content.addWidget(icon_label)
+        content.addWidget(text_label)
+        content.addStretch()
+        btn._nav_icon_label = icon_label
+        btn._nav_text_label = text_label
+        btn._nav_layout = content
+        self._sync_nav_button_content(btn, icon_key, text)
+
         if self.sidebar_expanded:
             btn.setMinimumWidth(196)
             btn.setMaximumWidth(196)
@@ -975,6 +990,32 @@ class MainWindow(QMainWindow):
             btn.setFixedWidth(48)
         add_press_effect(btn)
         return btn
+
+    def _sync_nav_button_content(self, btn: QPushButton, icon_key: str, text: str):
+        btn.setIcon(QIcon())
+        btn.setText("")
+        icon_label = getattr(btn, "_nav_icon_label", None)
+        text_label = getattr(btn, "_nav_text_label", None)
+        content = getattr(btn, "_nav_layout", None)
+        if not icon_label or not text_label or not content:
+            return
+
+        icon_label.setPixmap(self._nav_icon(icon_key).pixmap(QSize(24, 24)))
+        text_label.setText(text)
+        text_label.setVisible(self.sidebar_expanded)
+        if self.sidebar_expanded:
+            content.setContentsMargins(16, 0, 12, 0)
+        else:
+            content.setContentsMargins(12, 0, 12, 0)
+        self._style_nav_label(btn)
+
+    def _style_nav_label(self, btn: QPushButton):
+        text_label = getattr(btn, "_nav_text_label", None)
+        if not text_label:
+            return
+        colors = theme_palette(self.config.get("theme", "system"))
+        color = colors["accent"] if btn.isChecked() else colors["text"]
+        text_label.setStyleSheet(f"color: {color}; font-size: 15px; font-weight: 700;")
 
     def _nav_icon(self, icon_key: str) -> QIcon:
         if icon_key.startswith("asset:"):
@@ -990,22 +1031,16 @@ class MainWindow(QMainWindow):
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#111111"), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        pen = QPen(QColor("#111111"), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
-        center = 32
-        for index in range(8):
-            angle = math.radians(index * 45)
-            inner = 21
-            outer = 27
-            painter.drawLine(
-                int(center + math.cos(angle) * inner),
-                int(center + math.sin(angle) * inner),
-                int(center + math.cos(angle) * outer),
-                int(center + math.sin(angle) * outer),
-            )
-        painter.drawEllipse(17, 17, 30, 30)
+        points = QPolygonF()
+        for index in range(24):
+            angle = math.radians(index * 15)
+            radius = 27 if index % 3 == 0 else 22
+            points.append(QPointF(32 + math.cos(angle) * radius, 32 + math.sin(angle) * radius))
+        painter.drawPolygon(points)
         painter.drawEllipse(27, 27, 10, 10)
         painter.end()
         return QIcon(pixmap)
@@ -1045,9 +1080,7 @@ class MainWindow(QMainWindow):
             self.menu_label.setVisible(self.sidebar_expanded)
         for key, btn in getattr(self, "nav_buttons", {}).items():
             icon_key, text = self.nav_specs[key]
-            btn.setIcon(self._nav_icon(icon_key))
-            btn.setIconSize(QSize(24, 24))
-            btn.setText(text if self.sidebar_expanded else "")
+            self._sync_nav_button_content(btn, icon_key, text)
             btn.setProperty("expanded", self.sidebar_expanded)
             btn.style().unpolish(btn)
             btn.style().polish(btn)
@@ -1075,6 +1108,7 @@ class MainWindow(QMainWindow):
     def _mark_nav(self, key: str):
         for nav_key, btn in self.nav_buttons.items():
             btn.setChecked(nav_key == key)
+            self._style_nav_label(btn)
 
     def _fade_current_page(self):
         widget = self.stack.currentWidget()
@@ -1102,6 +1136,8 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         apply_app_theme(app, theme_name)
         app.setStyleSheet(app_stylesheet(theme_name))
+        for btn in getattr(self, "nav_buttons", {}).values():
+            self._style_nav_label(btn)
 
     def _on_config_changed(self):
         self.settings_page.refresh_banner()

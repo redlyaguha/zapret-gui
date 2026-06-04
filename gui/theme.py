@@ -191,21 +191,13 @@ def app_stylesheet(theme_name: str) -> str:
         background: transparent;
         text-align: center;
         padding: 0;
-        border-radius: 18px;
         font-size: 15px;
         font-weight: 700;
-        min-width: 48px;
         min-height: 48px;
         max-height: 48px;
     }}
     QPushButton#NavButton[expanded="true"] {{
-        text-align: left;
-        padding-left: 18px;
-        padding-right: 12px;
-    }}
-    QPushButton#NavButton:checked {{
-        background: {c["accent_soft"]};
-        color: {c["accent"]};
+        padding: 0;
     }}
     QPushButton#IconButton {{
         min-width: 48px;
@@ -215,15 +207,6 @@ def app_stylesheet(theme_name: str) -> str:
         padding: 0;
         border-radius: 18px;
         text-align: center;
-    }}
-    QFrame#NavIconFrame {{
-        min-width: 48px;
-        max-width: 48px;
-        min-height: 48px;
-        max-height: 48px;
-        border-radius: 18px;
-        border: 1px solid {c["border"]};
-        background: {c["panel_solid"]};
     }}
     QPushButton#SelectButton {{
         min-height: 36px;

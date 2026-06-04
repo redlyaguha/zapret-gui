@@ -5,7 +5,7 @@ import math
 import sys
 import webbrowser
 
-from PySide6.QtCore import QPointF, QEasingCurve, QPropertyAnimation, QSize, Qt, QThread, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QPointF, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, QThread, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QIcon, QDesktopServices, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
@@ -34,6 +34,87 @@ from gui.strategy_widget import DropdownSelect, SegmentedSwitch, StrategyWidget
 from gui.theme import apply_app_theme, app_stylesheet, palette as theme_palette
 from gui.tray_manager import TrayManager
 from updater.installer import install_zapret
+
+
+def qt_color(value: str) -> QColor:
+    if value.startswith("rgba(") and value.endswith(")"):
+        parts = [part.strip() for part in value[5:-1].split(",")]
+        if len(parts) == 4:
+            color = QColor(int(parts[0]), int(parts[1]), int(parts[2]))
+            color.setAlpha(int(parts[3]))
+            return color
+    return QColor(value)
+
+
+class SidebarNavButton(QPushButton):
+    ICON_BOX = 48
+    ICON_SIZE = 24
+    EXPANDED_WIDTH = 196
+
+    def __init__(self, icon: QIcon, text: str, theme_name: str, expanded: bool, parent=None):
+        super().__init__("", parent)
+        self.nav_icon = icon
+        self.nav_text = text
+        self.theme_name = theme_name
+        self.expanded = expanded
+        self.setObjectName("NavButton")
+        self.setCheckable(True)
+        self.setToolTip(text)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedHeight(self.ICON_BOX)
+        self.set_expanded(expanded)
+
+    def set_expanded(self, expanded: bool):
+        self.expanded = expanded
+        self.setProperty("expanded", expanded)
+        self.setFixedWidth(self.EXPANDED_WIDTH if expanded else self.ICON_BOX)
+        self.updateGeometry()
+        self.update()
+
+    def sizeHint(self):
+        return QSize(self.EXPANDED_WIDTH if self.expanded else self.ICON_BOX, self.ICON_BOX)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def set_theme_name(self, theme_name: str):
+        self.theme_name = theme_name
+        self.update()
+
+    def set_nav_icon(self, icon: QIcon):
+        self.nav_icon = icon
+        self.update()
+
+    def paintEvent(self, event):
+        colors = theme_palette(self.theme_name)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if self.isChecked() or self.underMouse():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(qt_color(colors["accent_soft"]))
+            painter.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 18, 18)
+
+        icon_rect = QRectF(0.5, 0.5, self.ICON_BOX - 1, self.ICON_BOX - 1)
+        painter.setPen(QPen(qt_color(colors["border"]), 1))
+        painter.setBrush(qt_color(colors["panel_solid"]))
+        painter.drawRoundedRect(icon_rect, 18, 18)
+
+        pixmap = self.nav_icon.pixmap(QSize(self.ICON_SIZE, self.ICON_SIZE))
+        x = (self.ICON_BOX - self.ICON_SIZE) // 2
+        y = (self.height() - self.ICON_SIZE) // 2
+        painter.drawPixmap(x, y, pixmap)
+
+        if self.expanded:
+            font = painter.font()
+            font.setPointSize(10)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(qt_color(colors["accent"] if self.isChecked() else colors["text"]))
+            text_rect = QRectF(self.ICON_BOX + 6, 0, self.width() - self.ICON_BOX - 10, self.height())
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.nav_text)
+
+        painter.end()
 
 
 class InstallWorker(QThread):
@@ -958,69 +1039,27 @@ class MainWindow(QMainWindow):
         self.sidebar_layout.addWidget(bottom)
 
     def _nav_button(self, icon_key: str, text: str) -> QPushButton:
-        btn = QPushButton("")
-        btn.setObjectName("NavButton")
-        btn.setCheckable(True)
-        btn.setToolTip(text)
-        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        btn.setProperty("expanded", self.sidebar_expanded)
-        btn.setFixedHeight(48)
-
-        content = QHBoxLayout(btn)
-        content.setSpacing(6)
-        content.setContentsMargins(0, 0, 0, 0)
-        icon_frame = QFrame(btn)
-        icon_frame.setObjectName("NavIconFrame")
-        icon_frame.setFixedSize(48, 48)
-        icon_frame.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        icon_frame_layout = QHBoxLayout(icon_frame)
-        icon_frame_layout.setContentsMargins(0, 0, 0, 0)
-        icon_label = QLabel(icon_frame)
-        icon_label.setFixedSize(24, 24)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        icon_frame_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
-        text_label = QLabel(text, btn)
-        text_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        content.addWidget(icon_frame)
-        content.addWidget(text_label)
-        content.addStretch()
-        btn._nav_icon_frame = icon_frame
-        btn._nav_icon_label = icon_label
-        btn._nav_text_label = text_label
-        btn._nav_layout = content
-        self._sync_nav_button_content(btn, icon_key, text)
-
-        if self.sidebar_expanded:
-            btn.setMinimumWidth(196)
-            btn.setMaximumWidth(196)
-        else:
-            btn.setFixedWidth(48)
+        btn = SidebarNavButton(
+            self._nav_icon(icon_key),
+            text,
+            self.config.get("theme", "system"),
+            self.sidebar_expanded,
+        )
+        btn._nav_icon_key = icon_key
         add_press_effect(btn)
         return btn
 
     def _sync_nav_button_content(self, btn: QPushButton, icon_key: str, text: str):
-        btn.setIcon(QIcon())
-        btn.setText("")
-        icon_label = getattr(btn, "_nav_icon_label", None)
-        text_label = getattr(btn, "_nav_text_label", None)
-        content = getattr(btn, "_nav_layout", None)
-        if not icon_label or not text_label or not content:
+        if not isinstance(btn, SidebarNavButton):
             return
-
-        icon_label.setPixmap(self._nav_icon(icon_key).pixmap(QSize(24, 24)))
-        text_label.setText(text)
-        text_label.setVisible(self.sidebar_expanded)
-        content.setContentsMargins(0, 0, 12 if self.sidebar_expanded else 0, 0)
+        btn.nav_text = text
+        btn.set_nav_icon(self._nav_icon(icon_key))
+        btn.set_expanded(self.sidebar_expanded)
         self._style_nav_label(btn)
 
     def _style_nav_label(self, btn: QPushButton):
-        text_label = getattr(btn, "_nav_text_label", None)
-        if not text_label:
-            return
-        colors = theme_palette(self.config.get("theme", "system"))
-        color = colors["accent"] if btn.isChecked() else colors["text"]
-        text_label.setStyleSheet(f"color: {color}; font-size: 15px; font-weight: 700;")
+        if isinstance(btn, SidebarNavButton):
+            btn.set_theme_name(self.config.get("theme", "system"))
 
     def _nav_icon(self, icon_key: str) -> QIcon:
         if icon_key.startswith("asset:"):
@@ -1086,15 +1125,8 @@ class MainWindow(QMainWindow):
         for key, btn in getattr(self, "nav_buttons", {}).items():
             icon_key, text = self.nav_specs[key]
             self._sync_nav_button_content(btn, icon_key, text)
-            btn.setProperty("expanded", self.sidebar_expanded)
             btn.style().unpolish(btn)
             btn.style().polish(btn)
-            if self.sidebar_expanded:
-                btn.setMinimumWidth(196)
-                btn.setMaximumWidth(196)
-            else:
-                btn.setMinimumWidth(48)
-                btn.setMaximumWidth(48)
 
     def _set_sidebar_width(self, width: int):
         self.sidebar.setMinimumWidth(width)
@@ -1141,8 +1173,15 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         apply_app_theme(app, theme_name)
         app.setStyleSheet(app_stylesheet(theme_name))
+        self._set_sidebar_width(232 if self.sidebar_expanded else 74)
+        self._sync_sidebar_labels()
         for btn in getattr(self, "nav_buttons", {}).values():
-            self._style_nav_label(btn)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.update()
+        if hasattr(self, "sidebar"):
+            self.sidebar.updateGeometry()
+            self.sidebar.update()
 
     def _on_config_changed(self):
         self.settings_page.refresh_banner()
